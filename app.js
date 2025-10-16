@@ -666,7 +666,7 @@ function applyTaskFilters(){
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
     if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
-    return da - db;
+    return db - da;
   });
 
   state.filteredTasks = filtered;
