@@ -886,19 +886,13 @@ function bindUI(){
     });
   });
 
-  // if (els.fabBtn){
-  //   els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
-  //   window.addEventListener('scroll', ()=>{
-  //     const shouldShow = window.scrollY > 300;
-  //     els.fabBtn.classList.toggle('hidden', !shouldShow);
-  //   });
-  // }
-
   if (els.fabBtn){
     els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
-    window.addEventListener('scroll', updateFabVisibility, { passive: true });
+    window.addEventListener('scroll', ()=>{
+      const shouldShow = window.scrollY > 300;
+      els.fabBtn.classList.toggle('hidden', !shouldShow);
+    });
   }
-
 
   if (els.notificationBtn){
     els.notificationBtn.addEventListener('click', showNotifications);
