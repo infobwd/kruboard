@@ -17,6 +17,9 @@
   
   <!-- Material Icons -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/infobwd/kruboard/refs/heads/main/favicon.ico">
+  <link rel="shortcut icon" href="https://raw.githubusercontent.com/infobwd/kruboard/refs/heads/main/favicon.ico">
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/infobwd/kruboard/refs/heads/main/logo.gif">
   
   <style>
     * {
@@ -181,6 +184,7 @@
       overflow: hidden;
     }
 
+    body.notifications-open .bottom-nav,
     body.modal-open .bottom-nav {
       transform: translateY(110%);
       pointer-events: none;
@@ -341,9 +345,9 @@
   <header class="header-gradient text-white shadow-lg sticky top-0 z-40">
     <div class="max-w-7xl mx-auto px-4 py-4">
       <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-3">
           <div class="bg-white/20 p-2 rounded-xl">
-            <span class="material-icons text-2xl">school</span>
+            <img src="https://raw.githubusercontent.com/infobwd/kruboard/refs/heads/main/logo.gif" alt="KruBoard Logo" class="w-10 h-10 rounded-lg object-cover">
           </div>
           <div>
             <h1 class="text-lg font-bold">KruBoard</h1>
