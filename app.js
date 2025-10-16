@@ -23,7 +23,11 @@ const state = {
   taskPagination: { page:1, pageSize:10, totalPages:1 },
   isAdmin: false,
   apiKey: localStorage.getItem('kruboard_api_key') || '',
-  cacheStatus: { dashboard: null, userStats: null, upcoming: null }
+  cacheStatus: { dashboard: null, userStats: null, upcoming: null },
+  activePage: 'homePage',
+  currentEditingTask: null,
+  workloadSnapshot: [],
+  notificationsOpen: false
 };
 
 const THAI_MONTHS = [
@@ -100,7 +104,18 @@ const els = {
   taskAssigneeInput: null,
   taskDueDateInput: null,
   taskNotesInput: null,
-  quickDueButtons: []
+  quickDueButtons: [],
+  notificationsPanel: document.getElementById('notificationsPanel'),
+  notificationsList: document.getElementById('notificationsList'),
+  notificationsClose: document.getElementById('notificationsClose'),
+  notificationsBackdrop: document.getElementById('notificationsBackdrop'),
+  notificationsFooter: document.getElementById('notificationsFooter'),
+  workloadContainer: document.getElementById('workloadHighlights'),
+  workloadEmpty: document.getElementById('workloadEmptyState'),
+  workloadList: document.getElementById('workloadList'),
+  workloadRefreshBtn: document.getElementById('workloadRefreshBtn'),
+  taskModalTitle: null,
+  taskModalDescription: null
 };
 
 // Initialize
@@ -110,7 +125,9 @@ function init(){
   cachePages();
   bindUI();
   initModalElements();
+  initNotificationPanel();
   updateProfileNavAvatar();
+  updateFabVisibility();
   
   // Add loading text element
   if (els.loadingToast){
@@ -395,6 +412,7 @@ async function loadSecureData(){
 
     renderTasks(state.tasks);
     renderUserStats(state.userStats);
+    await loadWorkloadSnapshot();
     updateAdminUI();
     addSyncButton();
     addAdminOptions();
@@ -616,20 +634,32 @@ function renderTaskList(){
     const statusClass = isCompleted ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
     const thaiDate = formatThaiDate(task.dueDate);
     const dueMeta = formatDueMeta_(task.dueDate);
-    const sourceLabel = task.source === 'WEB' ? '(จากเว็บ)' : '';
+    const sourceLabel = task.source === 'WEB' ? '(สร้างในเว็บ)' : '';
     const buttonClass = isCompleted
       ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
       : 'bg-blue-600 hover:bg-blue-700 text-white';
-    const buttonLabel = isCompleted ? 'เสร็จสมบูรณ์แล้ว' : 'ทำเครื่องหมายว่าเสร็จ';
+    const buttonLabel = isCompleted ? 'อัปเดตแล้ว' : 'ทำเครื่องหมายว่าสำเร็จ';
     const disabledAttr = isCompleted ? 'disabled' : '';
+    const normalizedId = String(task.id || '').trim();
+    const currentEmail = String(state.currentUser?.email || '').trim().toLowerCase();
+    const currentLine = String(state.currentUser?.lineUID || '').trim();
+    const taskEmail = String(task.assigneeEmail || '').trim().toLowerCase();
+    const taskLine = String(task.lineUID || '').trim();
+    const isOwner = (currentEmail && taskEmail && currentEmail === taskEmail) || (currentLine && taskLine && currentLine === taskLine);
+    const isWebSource = String(task.source || '').trim().toUpperCase() === 'WEB' || normalizedId.startsWith('WEB');
+    const canEdit = state.isAdmin || (isWebSource && isOwner);
+    const canDelete = state.isAdmin || (isWebSource && isOwner);
+    const noteHtml = task.notes ? escapeHtml(task.notes).replace(/\n/g, '<br>') : '';
 
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <div class="flex-1">
-            <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
+            <h3 class="text-base font-semibold text-gray-800">
+              ${escapeHtml(task.name)}
+            </h3>
             <p class="text-xs text-gray-400 mt-1">${sourceLabel}</p>
-            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'ไม่มีผู้รับผิดชอบ')}</p>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'ยังไม่ระบุผู้รับผิดชอบ')}</p>
           </div>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${statusClass}">
             ${escapeHtml(statusLabel)}
@@ -644,14 +674,41 @@ function renderTaskList(){
           ${task.link ? `
             <div class="flex items-center space-x-2 text-xs text-gray-500">
               <span class="material-icons text-base text-purple-500">link</span>
-              <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เปิดใน ${task.source}</a>
+              <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เปิด ${task.source}</a>
             </div>
           ` : ''}
         </div>
-        <button class="mt-4 w-full ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(task.id)}" ${disabledAttr}>
-          <span class="material-icons text-base">${isCompleted ? 'task_alt' : 'done'}</span>
-          <span>${buttonLabel}</span>
-        </button>
+        ${task.notes ? `
+          <div class="mt-3 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div class="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase">
+              <span class="material-icons text-slate-400 text-base">sticky_note_2</span>
+              หมายเหตุ
+            </div>
+            <p class="mt-1 leading-relaxed">${noteHtml}</p>
+          </div>
+        ` : ''}
+        <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <button class="flex-1 ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(normalizedId)}" ${disabledAttr}>
+            <span class="material-icons text-base">${isCompleted ? 'task_alt' : 'done'}</span>
+            <span>${buttonLabel}</span>
+          </button>
+          ${(canEdit || canDelete) ? `
+            <div class="flex gap-2">
+              ${canEdit ? `
+                <button type="button" class="px-3 py-2 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 text-sm font-medium transition flex items-center space-x-1" data-action="edit-task" data-task-id="${escapeAttr(normalizedId)}">
+                  <span class="material-icons text-base">edit</span>
+                  <span>แก้ไข</span>
+                </button>
+              ` : ''}
+              ${canDelete ? `
+                <button type="button" class="px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium transition flex items-center space-x-1" data-action="delete-task" data-task-id="${escapeAttr(normalizedId)}">
+                  <span class="material-icons text-base">delete</span>
+                  <span>ลบ</span>
+                </button>
+              ` : ''}
+            </div>
+          ` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -682,6 +739,78 @@ function renderTaskPagination(){
   if (els.taskPaginationNext) els.taskPaginationNext.disabled = currentPage >= totalPages;
 }
 
+async function loadWorkloadSnapshot(){
+  if (!state.isLoggedIn) return [];
+  try{
+    const res = await apiRequest('workload_snapshot', { limit: 10 });
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'workload snapshot error');
+    }
+    const data = Array.isArray(res.data) ? res.data : [];
+    state.workloadSnapshot = data;
+    renderWorkloadSnapshot(data);
+    return data;
+  }catch(err){
+    console.warn('workload snapshot error', err);
+    state.workloadSnapshot = [];
+    renderWorkloadSnapshot([]);
+    return [];
+  }
+}
+
+function renderWorkloadSnapshot(list){
+  if (!els.workloadContainer) return;
+  if (!state.isLoggedIn){
+    els.workloadContainer.classList.add('hidden');
+    return;
+  }
+  const items = Array.isArray(list) ? list : [];
+  els.workloadContainer.classList.remove('hidden');
+  if (!items.length){
+    if (els.workloadEmpty) els.workloadEmpty.textContent = 'ไม่มีข้อมูลภาระงานล่าสุด';
+    if (els.workloadEmpty) els.workloadEmpty.classList.remove('hidden');
+    if (els.workloadList) {
+      els.workloadList.innerHTML = '';
+      els.workloadList.classList.add('hidden');
+    }
+    return;
+  }
+  if (els.workloadEmpty) els.workloadEmpty.classList.add('hidden');
+  if (!els.workloadList) return;
+  const html = items.map((row, index)=>{
+    const assignee = row['Assignee'] || row['Email'] || 'ไม่ระบุ';
+    const weekScore = Number(row['Week Score'] || row['Week Tasks'] || 0);
+    const risk = row['Workload Risk'] || '';
+    const badge = getRiskBadgeClass_(risk);
+    return `
+      <div class="border border-blue-100 bg-blue-50/40 rounded-xl p-3 flex items-center justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${badge}">${escapeHtml(risk || 'ไม่ระบุ')}</span>
+            <span class="text-xs text-gray-400">อันดับ ${index + 1}</span>
+          </div>
+          <p class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(assignee)}</p>
+          <p class="text-xs text-gray-500">รวมงานทั้งหมด ${escapeHtml(String(row['Total Tasks'] || 0))} งาน</p>
+        </div>
+        <div class="text-right">
+          <p class="text-xl font-bold text-blue-600">${weekScore.toFixed(1)}</p>
+          <p class="text-xs text-gray-400">คะแนนสัปดาห์นี้</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+  els.workloadList.innerHTML = html;
+  els.workloadList.classList.remove('hidden');
+}
+
+function getRiskBadgeClass_(risk){
+  const text = String(risk || '').toLowerCase();
+  if (!text) return 'bg-slate-100 text-slate-600';
+  if (/(วิกฤต|critical)/.test(text)) return 'bg-rose-100 text-rose-600';
+  if (/(เสี่ยงสูง|high)/.test(text)) return 'bg-red-100 text-red-600';
+  if (/(เฝ้าระวัง|watch)/.test(text)) return 'bg-amber-100 text-amber-600';
+  return 'bg-emerald-100 text-emerald-600';
+}
 function renderUserStats(stats){
   if (!els.userStatsContainer) return;
   
@@ -793,10 +922,11 @@ function bindUI(){
 
   if (els.fabBtn){
     els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
-    window.addEventListener('scroll', ()=>{
-      const shouldShow = window.scrollY > 300;
-      els.fabBtn.classList.toggle('hidden', !shouldShow);
-    });
+    window.addEventListener('scroll', updateFabVisibility);
+  }
+
+  if (els.workloadRefreshBtn){
+    els.workloadRefreshBtn.addEventListener('click', ()=> loadWorkloadSnapshot());
   }
 
   if (els.notificationBtn){
@@ -805,10 +935,18 @@ function bindUI(){
 
   if (els.allTasksContainer){
     els.allTasksContainer.addEventListener('click', evt=>{
-      const button = evt.target.closest('[data-action="update-status"]');
-      if (!button) return;
-      const taskId = button.dataset.taskId;
-      handleUpdateStatus(taskId);
+      const target = evt.target.closest('[data-action]');
+      if (!target) return;
+      const taskId = target.dataset.taskId;
+      if (!taskId) return;
+      const action = target.dataset.action;
+      if (action === 'update-status'){
+        handleUpdateStatus(taskId);
+      }else if (action === 'edit-task'){
+        openEditTaskModal(taskId);
+      }else if (action === 'delete-task'){
+        handleDeleteTask(taskId);
+      }
     });
   }
 
@@ -864,6 +1002,8 @@ function initModalElements(){
   els.taskAssigneeInput = document.getElementById('taskAssignee');
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
+  els.taskModalTitle = document.getElementById('taskModalTitle');
+  els.taskModalDescription = document.getElementById('taskModalDescription');
   els.quickDueButtons = Array.from(document.querySelectorAll('[data-quick-due]'));
   if (els.taskDueDateInput){
     els.taskDueDateInput.addEventListener('input', ()=> updateQuickDueActive(null));
@@ -889,28 +1029,91 @@ function initModalElements(){
   updateQuickDueActive(null);
 }
 
-function openTaskModal(){
+function openTaskModal(mode = ''create'', task = null){
   if (!els.taskModal) return;
-  els.taskModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-  if (els.taskForm) els.taskForm.reset();
-  updateQuickDueActive(null);
+  if (state.activePage !== ''tasksPage''){
+    switchPage(''tasksPage'');
+    setTimeout(()=> openTaskModal(mode, task), 120);
+    return;
+  }
+  if (mode === ''edit'' && task){
+    configureTaskModalForEdit(task);
+  }else{
+    configureTaskModalForCreate();
+  }
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, ''0'');
+    const dd = String(today.getDate()).padStart(2, ''0'');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
   }
-  if (els.taskNameInput) els.taskNameInput.focus();
+  document.body.classList.add(''modal-open'');
+  els.taskModal.classList.remove(''hidden'');
+  const focusEl = els.taskNameInput;
+  if (focusEl) focusEl.focus();
 }
-
-function closeTaskModal(){
-  if (els.taskModal) els.taskModal.classList.add('hidden');
-  document.body.style.overflow = '';
+function configureTaskModalForCreate(){
+  state.currentEditingTask = null;
+  if (els.taskForm){
+    els.taskForm.reset();
+    els.taskForm.dataset.mode = ''create'';
+  }
   updateQuickDueActive(null);
+  if (els.taskDueDateInput) els.taskDueDateInput.value = '''';
+  if (els.taskAssigneeInput) els.taskAssigneeInput.value = '';
+  if (els.taskNotesInput) els.taskNotesInput.value = '';
+  if (els.taskModalTitle) els.taskModalTitle.textContent = ''เพิ่มงานใหม่'';
+  if (els.taskModalDescription) els.taskModalDescription.textContent = ''กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว'';
+  if (els.submitTaskBtn){
+    els.submitTaskBtn.innerHTML = '<span class="material-icons text-base">add_task</span><span>บันทึกงาน</span>';
+  }
 }
 
+function configureTaskModalForEdit(task){
+  state.currentEditingTask = task;
+  if (els.taskForm){
+    els.taskForm.dataset.mode = ''edit'';
+  }
+  if (els.taskNameInput) els.taskNameInput.value = task.name || '';
+  if (els.taskAssigneeInput) els.taskAssigneeInput.value = task.assigneeEmail || '';
+  if (els.taskDueDateInput) els.taskDueDateInput.value = task.dueDate && task.dueDate !== 'No Due Date' ? task.dueDate : '';
+  if (els.taskNotesInput) els.taskNotesInput.value = task.notes || '';
+  updateQuickDueActive(null);
+  highlightQuickDueForDate(task.dueDate);
+  if (els.taskModalTitle) els.taskModalTitle.textContent = ''แก้ไขงาน'';
+  if (els.taskModalDescription) els.taskModalDescription.textContent = ''ปรับรายละเอียดงานและบันทึกเพื่ออัปเดตข้อมูล'';
+  if (els.submitTaskBtn){
+    els.submitTaskBtn.innerHTML = '<span class="material-icons text-base">save</span><span>บันทึกการแก้ไข</span>';
+  }
+}
+
+function highlightQuickDueForDate(dateValue){
+  if (!Array.isArray(els.quickDueButtons) || !els.taskDueDateInput) return;
+  if (!dateValue || dateValue === 'No Due Date'){
+    updateQuickDueActive(null);
+    return;
+  }
+  const target = new Date(dateValue + 'T00:00:00');
+  if (Number.isNaN(target.getTime())){
+    updateQuickDueActive(null);
+    return;
+  }
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const diff = Math.round((target - today) / (24 * 60 * 60 * 1000));
+  const btn = els.quickDueButtons.find(el => Number(el.dataset.quickDue) === diff);
+  updateQuickDueActive(btn || null);
+}
+function closeTaskModal(){
+  if (els.taskModal) els.taskModal.classList.add(''hidden'');
+  document.body.classList.remove(''modal-open'');
+  updateQuickDueActive(null);
+  state.currentEditingTask = null;
+  if (els.taskForm){
+    delete els.taskForm.dataset.mode;
+  }
+}
 function applyQuickDueSelection(targetBtn, offsetDays){
   if (!els.taskDueDateInput) return;
   const base = new Date();
@@ -922,6 +1125,19 @@ function applyQuickDueSelection(targetBtn, offsetDays){
   updateQuickDueActive(targetBtn);
 }
 
+function initNotificationPanel(){
+  if (els.notificationsClose){
+    els.notificationsClose.addEventListener('click', closeNotificationsPanel);
+  }
+  if (els.notificationsBackdrop){
+    els.notificationsBackdrop.addEventListener('click', closeNotificationsPanel);
+  }
+  document.addEventListener('keydown', evt=>{
+    if (evt.key === 'Escape' && state.notificationsOpen){
+      closeNotificationsPanel();
+    }
+  });
+}
 function updateQuickDueActive(activeBtn){
   if (!Array.isArray(els.quickDueButtons)) return;
   els.quickDueButtons.forEach(btn=>{
@@ -943,229 +1159,101 @@ async function handleTaskFormSubmit(evt){
   evt.preventDefault();
   
   if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    toastInfo('ต้องเข้าสู่ระบบ');
     return;
   }
   
+  const mode = els.taskForm?.dataset.mode === 'edit' && state.currentEditingTask ? 'edit' : 'create';
   const name = (els.taskNameInput?.value || '').trim();
   const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
   const notes = (els.taskNotesInput?.value || '').trim();
   
   if (!name){
-    toastInfo('กรุณากรอกชื่องาน');
+    toastInfo('กรุณากรอกชื่อภารกิจ');
     return;
   }
   
+  const editingTaskId = state.currentEditingTask ? state.currentEditingTask.id : null;
   showModalLoading(true);
   closeTaskModal();
   
   try{
-    const res = await apiRequest('web_create_task', {
-      name,
-      assigneeEmail,
-      dueDate,
-      notes
-    }, { maxRetries: 2 });
-    
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'create task error');
+    if (mode === 'edit' && editingTaskId){
+      const res = await apiRequest('web_update_task', {
+        taskId: editingTaskId,
+        name,
+        assigneeEmail,
+        dueDate,
+        notes
+      }, { maxRetries: 2 });
+      if (!res || res.success === false){
+        throw new Error(res?.message || 'update task error');
+      }
+      toastInfo('อัปเดตงานเรียบร้อย');
+    }else{
+      const res = await apiRequest('web_create_task', {
+        name,
+        assigneeEmail,
+        dueDate,
+        notes
+      }, { maxRetries: 2 });
+      if (!res || res.success === false){
+        throw new Error(res?.message || 'create task error');
+      }
+      toastInfo('เพิ่มงานสำเร็จ');
     }
-    
-    toastInfo('✓ เพิ่มงานใหม่สำเร็จ');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
-    handleDataError(err, 'ไม่สามารถเพิ่มงานใหม่ได้');
+    handleDataError(err, 'ไม่สามารถบันทึกงานได้');
   }finally{
     showModalLoading(false);
   }
 }
-
-function addSyncButton(){
-  const tasksPage = els.tasksPage;
-  if (!tasksPage) return;
-  
-  let syncSection = document.getElementById('syncAdminSection');
-  if (!syncSection && state.isAdmin && state.apiKey){
-    syncSection = document.createElement('div');
-    syncSection.id = 'syncAdminSection';
-    syncSection.className = 'bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-300 rounded-xl p-4 mb-4 flex items-center justify-between';
-    syncSection.innerHTML = `
-      <div class="flex items-center space-x-3">
-        <span class="material-icons text-blue-600 text-2xl">cloud_sync</span>
-        <div>
-          <h3 class="font-semibold text-gray-800">ตัวเลือกผู้ดูแลระบบ</h3>
-          <p class="text-xs text-gray-600">ซิงค์จาก Asana หรือวิเคราะห์ภาระงาน</p>
-        </div>
-      </div>
-      <div class="flex space-x-2">
-        <button id="btnSyncRecent" class="flex items-center space-x-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition">
-          <span class="material-icons text-sm">sync</span>
-          <span>ซิงค์ (14 วัน)</span>
-        </button>
-        <button id="btnAnalyzeRisk" class="flex items-center space-x-1 bg-purple-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-purple-700 transition">
-          <span class="material-icons text-sm">analytics</span>
-          <span>วิเคราะห์</span>
-        </button>
-      </div>
-    `;
-    
-    const firstChild = tasksPage.firstChild;
-    if (firstChild){
-      tasksPage.insertBefore(syncSection, firstChild);
-    } else {
-      tasksPage.appendChild(syncSection);
-    }
-    
-    const btnSync = document.getElementById('btnSyncRecent');
-    if (btnSync) btnSync.addEventListener('click', handleAdminSync);
-    
-    const btnAnalyze = document.getElementById('btnAnalyzeRisk');
-    if (btnAnalyze) btnAnalyze.addEventListener('click', handleAdminAnalyze);
-  }
-}
-
-async function handleAdminSync(){
-  if (!state.isAdmin || !state.apiKey){
-    toastInfo('ต้องเป็นผู้ดูแลระบบและมี API Key');
+function openEditTaskModal(taskId){
+  if (!state.isLoggedIn){
+    toastInfo('ต้องเข้าสู่ระบบ');
     return;
   }
-  
-  const confirmed = confirm('ซิงค์งานล่าสุด 14 วันจาก Asana?\n\nสิ่งนี้อาจใช้เวลาสักครู่...');
+  const normalizedId = String(taskId || '').trim().toUpperCase();
+  const task = state.tasks.find(row => String(row.id || '').trim().toUpperCase() === normalizedId);
+  if (!task){
+    toastInfo('ไม่พบงานที่ต้องการแก้ไข');
+    return;
+  }
+  const currentEmail = String(state.currentUser?.email || '').trim().toLowerCase();
+  const currentLine = String(state.currentUser?.lineUID || '').trim();
+  const taskEmail = String(task.assigneeEmail || '').trim().toLowerCase();
+  const taskLine = String(task.lineUID || '').trim();
+  const owns = (currentEmail && taskEmail && currentEmail === taskEmail) || (currentLine && taskLine && currentLine === taskLine);
+  const isWebSource = String(task.source || '').trim().toUpperCase() === 'WEB' || normalizedId.startsWith('WEB');
+  if (!state.isAdmin && !(isWebSource && owns)){
+    toastInfo('ไม่มีสิทธิ์แก้ไขงานนี้');
+    return;
+  }
+  openTaskModal('edit', task);
+}
+async function handleDeleteTask(taskId){
+  if (!state.isLoggedIn){
+    toastInfo('ต้องเข้าสู่ระบบ');
+    return;
+  }
+  const confirmed = confirm('ยืนยันลบงานนี้หรือไม่?\n\nการลบจะไม่สามารถกู้คืนได้');
   if (!confirmed) return;
-  
-  showLoading(true, 'กำลังซิงค์ Asana...');
-  
+  showLoading(true, 'กำลังลบงาน...');
   try{
-    const res = await apiRequest('sync_asana_recent_v2', {
-      days: 14,
-      force: true
-    }, { maxRetries: 1, timeout: 60000 });
-    
+    const res = await apiRequest('web_delete_task', { taskId }, { maxRetries: 1 });
     if (!res || res.success === false){
-      throw new Error(res?.message || 'sync failed');
+      throw new Error(res?.message || 'delete task error');
     }
-    
-    const msg = `✓ ซิงค์สำเร็จ\n━━━━━━━━━\nทั้งหมด: ${res.total}\nสร้างใหม่: ${res.created}\nอัปเดต: ${res.updated}`;
-    toastInfo(msg);
-    
+    toastInfo('ลบงานเรียบร้อย');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
-    handleDataError(err, 'ซิงค์ไม่สำเร็จ');
+    handleDataError(err, 'ไม่สามารถลบงานได้');
   }finally{
     showLoading(false);
   }
 }
-
-async function handleAdminAnalyze(){
-  if (!state.isAdmin || !state.apiKey){
-    toastInfo('ต้องเป็นผู้ดูแลระบบและมี API Key');
-    return;
-  }
-  
-  const confirmed = confirm('วิเคราะห์ภาระงานและความเสี่ยง?\n\nสิ่งนี้จะอัปเดตชีต Workload');
-  if (!confirmed) return;
-  
-  showLoading(true, 'กำลังวิเคราะห์...');
-  
-  try{
-    const res = await apiRequest('analyze_workload_risk_v2', {}, { maxRetries: 1, timeout: 60000 });
-    
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'analyze failed');
-    }
-    
-    const msg = `✓ วิเคราะห์สำเร็จ\n━━━━━━━━━\nคน: ${res.totalPeople}\nงานทั้งหมด: ${res.totalTasksAll}\nสัปดาห์นี้: ${res.totalTasksWeek}\n\n✓ ชีต Workload อัปเดตแล้ว`;
-    toastInfo(msg);
-  }catch(err){
-    handleDataError(err, 'วิเคราะห์ไม่สำเร็จ');
-  }finally{
-    showLoading(false);
-  }
-}
-
-function addAdminOptions(){
-  const profilePage = els.profilePage;
-  if (!profilePage) return;
-  
-  if (state.isLoggedIn && state.isAdmin && state.apiKey){
-    let adminSection = document.getElementById('adminActionsSection');
-    if (!adminSection){
-      adminSection = document.createElement('div');
-      adminSection.id = 'adminActionsSection';
-      adminSection.className = 'bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-300 rounded-2xl shadow-md p-6 mb-4';
-      adminSection.innerHTML = `
-        <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
-          <span class="material-icons text-orange-600 mr-2">admin_panel_settings</span>
-          เครื่องมือผู้ดูแลระบบ
-        </h3>
-        <div class="space-y-2">
-          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminSync2">
-            <div class="flex items-center space-x-3">
-              <span class="material-icons text-blue-600">cloud_download</span>
-              <div class="text-left">
-                <p class="text-gray-800 font-medium">ซิงค์ Asana</p>
-                <p class="text-xs text-gray-500">อัปเดตงานล่าสุด 14 วัน</p>
-              </div>
-            </div>
-            <span class="material-icons text-gray-400">chevron_right</span>
-          </button>
-          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
-            <div class="flex items-center space-x-3">
-              <span class="material-icons text-purple-600">assessment</span>
-              <div class="text-left">
-                <p class="text-gray-800 font-medium">วิเคราะห์ภาระงาน</p>
-                <p class="text-xs text-gray-500">วิเคราะห์ความเสี่ยงและคะแนน</p>
-              </div>
-            </div>
-            <span class="material-icons text-gray-400">chevron_right</span>
-          </button>
-        </div>
-      `;
-      
-      const profileContent = profilePage.querySelector('.bg-white.rounded-2xl');
-      if (profileContent && profileContent.nextSibling){
-        profilePage.insertBefore(adminSection, profileContent.nextSibling);
-      }
-      
-      const btnSync2 = document.getElementById('btnAdminSync2');
-      if (btnSync2) btnSync2.addEventListener('click', handleAdminSync);
-      
-      const btnAnalyze2 = document.getElementById('btnAdminAnalyze2');
-      if (btnAnalyze2) btnAnalyze2.addEventListener('click', handleAdminAnalyze);
-    }
-  }
-}
-
-function updateAdminUI(){
-  if (els.addTaskBtn){
-    if (state.isLoggedIn){
-      els.addTaskBtn.classList.remove('hidden');
-    } else {
-      els.addTaskBtn.classList.add('hidden');
-    }
-  }
-}
-
-function showNotifications(){
-  if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
-    return;
-  }
-  if (!state.notifications.length){
-    toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
-    return;
-  }
-  const lines = state.notifications.slice(0, 5).map(task=>{
-    const thaiDate = formatThaiDate(task.dueDate);
-    const meta = formatDueMeta_(task.dueDate);
-    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
-  });
-  const remaining = state.notifications.length - lines.length;
-  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
-  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
-}
-
 async function handleUpdateStatus(taskId){
   if (!state.isLoggedIn){
     toastInfo('ต้องเข้าสู่ระบบก่อน');
@@ -1462,6 +1550,14 @@ function switchPage(pageId){
     const match = item.getAttribute('data-page') === pageId;
     item.classList.toggle('active', match);
   });
+  state.activePage = pageId;
+  updateFabVisibility();
+}
+
+function updateFabVisibility(){
+  if (!els.fabBtn) return;
+  const shouldShow = state.activePage === 'homePage' && window.scrollY > 300;
+  els.fabBtn.classList.toggle('hidden', !shouldShow);
 }
 
 function showLoading(show, text = 'กำลังโหลดข้อมูล...'){
