@@ -346,6 +346,9 @@ function applyUpcomingData(list, source){
   state.notifications = personal ? data : [];
   setText(els.notificationCount, personal ? (data.length || 0) : 0);
   renderUpcomingTasks(data);
+  if (state.notificationsOpen){
+    renderNotificationsList(state.notifications);
+  }
 }
 
 function readClientCache(key){
@@ -740,7 +743,11 @@ function renderTaskPagination(){
 }
 
 async function loadWorkloadSnapshot(){
-  if (!state.isLoggedIn) return [];
+  if (!state.isLoggedIn){
+    renderWorkloadSnapshot([]);
+    return [];
+  }
+  if (els.workloadRefreshBtn) els.workloadRefreshBtn.disabled = true;
   try{
     const res = await apiRequest('workload_snapshot', { limit: 10 });
     if (!res || res.success === false){
@@ -755,6 +762,8 @@ async function loadWorkloadSnapshot(){
     state.workloadSnapshot = [];
     renderWorkloadSnapshot([]);
     return [];
+  }finally{
+    if (els.workloadRefreshBtn) els.workloadRefreshBtn.disabled = false;
   }
 }
 
@@ -1029,14 +1038,14 @@ function initModalElements(){
   updateQuickDueActive(null);
 }
 
-function openTaskModal(mode = ''create'', task = null){
+function openTaskModal(mode = 'create', task = null){
   if (!els.taskModal) return;
-  if (state.activePage !== ''tasksPage''){
-    switchPage(''tasksPage'');
+  if (state.activePage !== 'tasksPage'){
+    switchPage('tasksPage');
     setTimeout(()=> openTaskModal(mode, task), 120);
     return;
   }
-  if (mode === ''edit'' && task){
+  if (mode === 'edit' && task){
     configureTaskModalForEdit(task);
   }else{
     configureTaskModalForCreate();
@@ -1044,27 +1053,23 @@ function openTaskModal(mode = ''create'', task = null){
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, ''0'');
-    const dd = String(today.getDate()).padStart(2, ''0'');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
   }
-  document.body.classList.add(''modal-open'');
-  els.taskModal.classList.remove(''hidden'');
-  const focusEl = els.taskNameInput;
-  if (focusEl) focusEl.focus();
-}
+  document.body.classList.add('modal-open');\n  els.taskModal.classList.remove('hidden');\n  updateFabVisibility();\n  if (els.taskNameInput) els.taskNameInput.focus();\n}\n
 function configureTaskModalForCreate(){
   state.currentEditingTask = null;
   if (els.taskForm){
     els.taskForm.reset();
-    els.taskForm.dataset.mode = ''create'';
+    els.taskForm.dataset.mode = 'create';
   }
   updateQuickDueActive(null);
-  if (els.taskDueDateInput) els.taskDueDateInput.value = '''';
+  if (els.taskDueDateInput) els.taskDueDateInput.value = '';
   if (els.taskAssigneeInput) els.taskAssigneeInput.value = '';
   if (els.taskNotesInput) els.taskNotesInput.value = '';
-  if (els.taskModalTitle) els.taskModalTitle.textContent = ''เพิ่มงานใหม่'';
-  if (els.taskModalDescription) els.taskModalDescription.textContent = ''กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว'';
+  if (els.taskModalTitle) els.taskModalTitle.textContent = 'เพิ่มงานใหม่';
+  if (els.taskModalDescription) els.taskModalDescription.textContent = 'กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว';
   if (els.submitTaskBtn){
     els.submitTaskBtn.innerHTML = '<span class="material-icons text-base">add_task</span><span>บันทึกงาน</span>';
   }
@@ -1073,16 +1078,16 @@ function configureTaskModalForCreate(){
 function configureTaskModalForEdit(task){
   state.currentEditingTask = task;
   if (els.taskForm){
-    els.taskForm.dataset.mode = ''edit'';
+    els.taskForm.dataset.mode = 'edit';
   }
   if (els.taskNameInput) els.taskNameInput.value = task.name || '';
   if (els.taskAssigneeInput) els.taskAssigneeInput.value = task.assigneeEmail || '';
-  if (els.taskDueDateInput) els.taskDueDateInput.value = task.dueDate && task.dueDate !== 'No Due Date' ? task.dueDate : '';
+  if (els.taskDueDateInput) els.taskDueDateInput.value = (task.dueDate && task.dueDate !== 'No Due Date') ? task.dueDate : '';
   if (els.taskNotesInput) els.taskNotesInput.value = task.notes || '';
   updateQuickDueActive(null);
   highlightQuickDueForDate(task.dueDate);
-  if (els.taskModalTitle) els.taskModalTitle.textContent = ''แก้ไขงาน'';
-  if (els.taskModalDescription) els.taskModalDescription.textContent = ''ปรับรายละเอียดงานและบันทึกเพื่ออัปเดตข้อมูล'';
+  if (els.taskModalTitle) els.taskModalTitle.textContent = 'แก้ไขงาน';
+  if (els.taskModalDescription) els.taskModalDescription.textContent = 'ปรับรายละเอียดงานและบันทึกเพื่ออัปเดตข้อมูล';
   if (els.submitTaskBtn){
     els.submitTaskBtn.innerHTML = '<span class="material-icons text-base">save</span><span>บันทึกการแก้ไข</span>';
   }
@@ -1094,7 +1099,7 @@ function highlightQuickDueForDate(dateValue){
     updateQuickDueActive(null);
     return;
   }
-  const target = new Date(dateValue + 'T00:00:00');
+  const target = new Date(`${dateValue}T00:00:00`);
   if (Number.isNaN(target.getTime())){
     updateQuickDueActive(null);
     return;
@@ -1105,14 +1110,16 @@ function highlightQuickDueForDate(dateValue){
   const btn = els.quickDueButtons.find(el => Number(el.dataset.quickDue) === diff);
   updateQuickDueActive(btn || null);
 }
+
 function closeTaskModal(){
-  if (els.taskModal) els.taskModal.classList.add(''hidden'');
-  document.body.classList.remove(''modal-open'');
+  if (els.taskModal) els.taskModal.classList.add('hidden');
+  document.body.classList.remove('modal-open');
   updateQuickDueActive(null);
   state.currentEditingTask = null;
   if (els.taskForm){
     delete els.taskForm.dataset.mode;
   }
+  updateFabVisibility();
 }
 function applyQuickDueSelection(targetBtn, offsetDays){
   if (!els.taskDueDateInput) return;
@@ -1138,6 +1145,65 @@ function initNotificationPanel(){
     }
   });
 }
+
+function showNotifications(){
+  if (!state.isLoggedIn){
+    toastInfo('ต้องเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
+    return;
+  }
+  renderNotificationsList(state.notifications);
+  openNotificationsPanel();
+}
+
+function renderNotificationsList(list){
+  if (!els.notificationsList) return;
+  const notifications = Array.isArray(list) ? list.slice(0, 20) : [];
+  if (!notifications.length){
+    els.notificationsList.innerHTML = '<div class="notification-item text-center text-sm text-gray-500">ยังไม่มีการแจ้งเตือน</div>';
+  }else{
+    const html = notifications.map(task=>{
+      const thaiDate = formatThaiDate(task.dueDate);
+      const meta = formatDueMeta_(task.dueDate);
+      const assignee = task.assignee || 'ไม่ระบุ';
+      return `
+        <div class="notification-item">
+          <div class="font-medium text-gray-800">${escapeHtml(task.name)}</div>
+          <div class="meta">
+            <span class="material-icons text-xs text-blue-400">event</span>
+            <span>${escapeHtml(thaiDate)}</span>
+            ${meta ? `<span>${escapeHtml(meta)}</span>` : ''}
+          </div>
+          <div class="meta">
+            <span class="material-icons text-xs text-emerald-400">person</span>
+            <span>${escapeHtml(assignee)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    els.notificationsList.innerHTML = html;
+  }
+  if (els.notificationsFooter){
+    const total = state.notifications.length || 0;
+    els.notificationsFooter.textContent = total ? `ทั้งหมด ${total} รายการ` : 'ไม่มีข้อมูลแจ้งเตือน';
+  }
+}
+
+function openNotificationsPanel(){
+  if (!els.notificationsPanel) return;
+  els.notificationsPanel.classList.remove('hidden');
+  document.body.classList.add('notifications-open');
+  state.notificationsOpen = true;
+  updateFabVisibility();
+}
+
+function closeNotificationsPanel(){
+  if (!els.notificationsPanel) return;
+  els.notificationsPanel.classList.add('hidden');
+  document.body.classList.remove('notifications-open');
+  state.notificationsOpen = false;
+  updateFabVisibility();
+}
+
 function updateQuickDueActive(activeBtn){
   if (!Array.isArray(els.quickDueButtons)) return;
   els.quickDueButtons.forEach(btn=>{
@@ -1497,12 +1563,29 @@ function updateProfileNavAvatar(){
   const displayName = state.profile?.name || state.currentUser?.name || 'Profile';
 
   if (picture){
-    avatar.src = escapeAttr(picture);
-    avatar.alt = escapeAttr(displayName);
+    const applyVisible = ()=>{
+      avatar.classList.remove('hidden');
+      icon.classList.add('hidden');
+    };
+    if (avatar.dataset.currentSrc !== picture){
+      avatar.classList.add('hidden');
+      icon.classList.remove('hidden');
+      avatar.onload = applyVisible;
+      avatar.onerror = ()=>{
+        delete avatar.dataset.currentSrc;
+        avatar.removeAttribute('src');
+        avatar.classList.add('hidden');
+        icon.classList.remove('hidden');
+      };
+      avatar.dataset.currentSrc = picture;
+      avatar.src = picture;
+    }else{
+      applyVisible();
+    }
+    avatar.alt = displayName;
     avatar.loading = 'lazy';
-    avatar.classList.remove('hidden');
-    icon.classList.add('hidden');
   } else {
+    delete avatar.dataset.currentSrc;
     avatar.removeAttribute('src');
     avatar.removeAttribute('loading');
     avatar.classList.add('hidden');
@@ -1556,7 +1639,8 @@ function switchPage(pageId){
 
 function updateFabVisibility(){
   if (!els.fabBtn) return;
-  const shouldShow = state.activePage === 'homePage' && window.scrollY > 300;
+  const overlayActive = document.body.classList.contains('modal-open') || state.notificationsOpen;
+  const shouldShow = !overlayActive && state.activePage === 'homePage' && window.scrollY > 300;
   els.fabBtn.classList.toggle('hidden', !shouldShow);
 }
 
