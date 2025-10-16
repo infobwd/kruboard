@@ -293,7 +293,7 @@ async function loadSecureData(){
 async function fetchUserStatsCached(){
   return apiRequest('user_stats_cached', {}, { 
     maxRetries: 1,
-    timeout: 10000
+    timeout: 20000
   });
 }
 
