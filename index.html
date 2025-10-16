@@ -45,6 +45,7 @@
       box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
       z-index: 1000;
       border-top: 1px solid #e5e7eb;
+      transition: transform 0.3s ease;
     }
     
     .nav-item {
@@ -170,6 +171,86 @@
       background: #2563eb;
       color: #ffffff;
       box-shadow: 0 10px 20px rgba(37,99,235,0.35);
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
+    body.notifications-open {
+      overflow: hidden;
+    }
+
+    body.modal-open .bottom-nav {
+      transform: translateY(110%);
+      pointer-events: none;
+    }
+
+    .notifications-panel {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 1200;
+      transition: opacity 0.3s ease;
+    }
+
+    .notifications-panel.hidden {
+      display: none;
+    }
+
+    .notifications-card {
+      width: 100%;
+      max-width: 420px;
+      background: #ffffff;
+      border-radius: 24px 24px 0 0;
+      padding: 20px 20px 24px;
+      box-shadow: 0 -12px 32px rgba(15,23,42,0.25);
+      animation: slideUp 0.3s ease;
+    }
+
+    .notifications-card header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .notifications-list {
+      max-height: 320px;
+      overflow-y: auto;
+      display: grid;
+      gap: 12px;
+      padding-right: 4px;
+    }
+
+    .notification-item {
+      border-radius: 16px;
+      padding: 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .notification-item .meta {
+      font-size: 12px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .notifications-panel .panel-backdrop {
+      position: absolute;
+      inset: 0;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(40px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
     }
 
     .nav-item span {
@@ -486,6 +567,19 @@
       <div id="userStatsContainer" class="space-y-2">
         <!-- User stats will be loaded here -->
       </div>
+      <section id="workloadHighlights" class="mt-6 bg-white rounded-2xl shadow-sm border border-blue-100 p-4 hidden">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+            <span class="material-icons text-sky-500">insights</span>
+            ภาระงานล่าสุด
+          </h3>
+          <button type="button" id="workloadRefreshBtn" class="text-xs font-medium text-blue-600 hover:underline">
+            รีเฟรช
+          </button>
+        </div>
+        <p class="text-sm text-gray-500" id="workloadEmptyState">กดปุ่มรีเฟรชเพื่อดึงข้อมูลภาระงานล่าสุด</p>
+        <div id="workloadList" class="space-y-3 hidden"></div>
+      </section>
     </div>
 
     <!-- Profile Page -->
@@ -579,8 +673,8 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-xs font-semibold uppercase tracking-wide text-white/80">สร้างภารกิจใหม่</p>
-              <h3 class="text-xl font-bold text-white mt-1">เพิ่มงานใหม่</h3>
-              <p class="text-sm text-white/80 mt-1">กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว</p>
+              <h3 class="text-xl font-bold text-white mt-1" id="taskModalTitle">เพิ่มงานใหม่</h3>
+              <p class="text-sm text-white/80 mt-1" id="taskModalDescription">กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว</p>
             </div>
             <button id="closeModalBtn" class="p-2 rounded-full bg-white/15 hover:bg-white/25 transition">
               <span class="material-icons text-white">close</span>
@@ -617,10 +711,10 @@
                   <input type="date" id="taskDueDate" class="w-full">
                 </div>
                 <div class="flex flex-wrap gap-2">
-                  <button type="button" class="quick-due-btn" data-quick-due="0">วันนี้</button>
-                  <button type="button" class="quick-due-btn" data-quick-due="1">พรุ่งนี้</button>
-                  <button type="button" class="quick-due-btn" data-quick-due="3">อีก 3 วัน</button>
-                  <button type="button" class="quick-due-btn" data-quick-due="7">ใน 7 วัน</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="0" aria-pressed="false">วันนี้</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="1" aria-pressed="false">พรุ่งนี้</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="3" aria-pressed="false">อีก 3 วัน</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="7" aria-pressed="false">ใน 7 วัน</button>
                 </div>
               </div>
             </div>
@@ -644,6 +738,23 @@
           </div>
         </form>
       </div>
+    </div>
+  </div>
+
+  <div id="notificationsPanel" class="notifications-panel hidden">
+    <div id="notificationsBackdrop" class="panel-backdrop"></div>
+    <div class="notifications-card">
+      <header>
+        <div>
+          <p class="text-xs uppercase text-gray-400 font-semibold tracking-wide">การแจ้งเตือน</p>
+          <h3 class="text-lg font-bold text-gray-800 mt-0.5">งานที่ใกล้ถึงกำหนด</h3>
+        </div>
+        <button type="button" id="notificationsClose" class="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition">
+          <span class="material-icons text-gray-500">close</span>
+        </button>
+      </header>
+      <div id="notificationsList" class="notifications-list"></div>
+      <p class="text-xs text-gray-400 mt-3" id="notificationsFooter">อัปเดตจากรายการงานของคุณ</p>
     </div>
   </div>
 
