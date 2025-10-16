@@ -1,6 +1,6 @@
 /* KruBoard front-end (GitHub hosted) - Updated Version */
 const APP_CONFIG = {
-  scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
+  scriptUrl: 'https://script.google.com/macros/s/AKfycbxD9lO5R_xFFKPp0e0llgoKtbXkr0upnZd3_GU8L0Ze308kITEENaPjK1PvvfkgO8iy/exec',
   liffId: '2006490627-3NpRPl0G'
 };
 
