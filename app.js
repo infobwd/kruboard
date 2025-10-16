@@ -1,4 +1,4 @@
-/* KruBoard front-end (GitHub hosted) - Updated Version */
+/* KruBoard front-end (GitHub hosted) - API-current Version (dashboard_overview, my_stats, tasks_recent30) */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbxD9lO5R_xFFKPp0e0llgoKtbXkr0upnZd3_GU8L0Ze308kITEENaPjK1PvvfkgO8iy/exec',
   liffId: '2006490627-3NpRPl0G'
@@ -11,7 +11,7 @@ const state = {
   tasks: [],
   userStats: [],
   dashboard: null,
-  personalStats: null,
+  personalStats: null,  // ไม่มีจาก API ปัจจุบัน แต่คงตัวแปรไว้ให้ UI
   currentUser: null,
   notifications: [],
   filteredTasks: [],
@@ -235,7 +235,6 @@ function initModalElements(){
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
   
-  // Bind modal events
   if (els.closeModalBtn){
     els.closeModalBtn.addEventListener('click', closeTaskModal);
   }
@@ -245,7 +244,6 @@ function initModalElements(){
   if (els.taskForm){
     els.taskForm.addEventListener('submit', handleTaskFormSubmit);
   }
-  // Close modal on outside click
   if (els.taskModal){
     els.taskModal.addEventListener('click', (evt)=>{
       if (evt.target === els.taskModal){
@@ -259,11 +257,9 @@ function openTaskModal(){
   if (!els.taskModal) return;
   els.taskModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  // Reset form
   if (els.taskForm){
     els.taskForm.reset();
   }
-  // Set today as minimum date
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -314,7 +310,7 @@ async function handleTaskFormSubmit(evt){
   
   try{
     const res = await jsonpRequest({
-      action:'asana_create_task',
+      action:'asana_create_task', // อยู่ในกลุ่ม admin / key
       name,
       assigneeEmail,
       dueDate,
@@ -592,104 +588,86 @@ function handleDataError(err, fallbackMessage){
   }
 }
 
-/* ============================ Data Loaders (API v.new) ============================ */
+/* ============================ Data Loaders (API current) ============================ */
 async function loadPublicData(){
-  // dashboard เป็น public endpoint
+  // 1) ภาพรวม (public)
   const dash = await fetchDashboardStats();
   renderDashboard(dash);
-  // upcoming ถูก guard เมื่อ REQUIRE_LINE_LOGIN=true → โหลดเฉพาะตอนล็อกอิน
-  if (state.isLoggedIn){
-    await loadUpcomingTasks();
-  }else{
-    setText(els.notificationCount, 0);
-    if (els.taskCardsContainer){
-      els.taskCardsContainer.innerHTML = `
-        <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
-          เข้าสู่ระบบผ่าน LINE เพื่อดูงานที่กำลังจะถึง
-        </div>
-      `;
-    }
-  }
+
+  // 2) Upcoming ใช้ tasks_recent30 แล้วกรองช่วง X วัน
+  await loadUpcomingTasks();
 }
 
 function fetchDashboardStats(){
-  const payload = { action:'dashboard' };
-  if (state.isLoggedIn && state.profile?.idToken){
-    payload.idToken = state.profile.idToken;
-  }
-  return jsonpRequest(payload).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'dashboard error');
+  return jsonpRequest({ action:'dashboard_overview' }).then(ov=>{
+    if (!ov || ov.success === false){
+      throw new Error(ov?.message || 'dashboard_overview error');
     }
-    // รูปแบบที่ API ส่งกลับ: { summary, personalSummary, currentUser }
-    const rawSummary = res.summary || res.data?.summary || {};
-    const personal = res.personalSummary || res.data?.personalSummary || null;
-    const currentUser = res.currentUser || null;
+    const totalTasks     = Number(ov.totalAll || 0);
+    const completedTasks = Number(ov.completedAll || 0);
+    const pendingTasks   = Number(ov.pendingAll || 0);
+    const completionRate = Number(ov.rateOverall || (totalTasks ? Math.round((completedTasks/totalTasks)*100) : 0));
+    const month          = ov.month || {};
+    const currentMonthTasks = Number(month.total || 0);
 
-    // normalized summary
-    let totalTasks=0, completedTasks=0, pendingTasks=0, completionRate=0, currentMonthTasks=0, upcomingTasks=0, uniqueAssignees=0;
-
-    if (rawSummary.totals){ // แบบใหม่จาก apiComputeSummaryFallback_
-      totalTasks    = Number(rawSummary.totals.all || 0);
-      completedTasks= Number(rawSummary.totals.done || 0);
-      pendingTasks  = Number(rawSummary.totals.pending || 0);
-      completionRate= totalTasks ? Math.round((completedTasks/totalTasks)*100) : 0;
-      upcomingTasks = Number((rawSummary.alerts && rawSummary.alerts.dueSoon7d) || 0);
-    }else{
-      totalTasks    = Number(rawSummary.totalAll || rawSummary.totalTasks || 0);
-      completedTasks= Number(rawSummary.completedAll || rawSummary.completedTasks || 0);
-      pendingTasks  = Number(rawSummary.pendingAll || rawSummary.pendingTasks || 0);
-      completionRate= Number(rawSummary.rateOverall || rawSummary.completionRate || (totalTasks ? Math.round((completedTasks/totalTasks)*100) : 0));
-      const monthObj = rawSummary.month || {};
-      currentMonthTasks = Number(monthObj.total || rawSummary.currentMonthTasks || 0);
-    }
-
-    let personalNorm = null;
-    if (personal){
-      personalNorm = {
-        totalTasks: Number(personal.total || personal.totalTasks || 0),
-        completedTasks: Number(personal.completed || personal.completedTasks || 0),
-        pendingTasks: Number(personal.pending || personal.pendingTasks || 0),
-        currentMonthTasks: Number(personal.dueThisMonth || personal.currentMonthTasks || 0),
-        upcomingTasks: Number(personal.dueSoon7d || personal.upcomingTasks || 0),
-        email: personal.email || ''
-      };
-    }
-
-    if (currentUser){
-      state.currentUser = currentUser;
-      state.isAdmin = String(currentUser.level || '').trim().toLowerCase() === 'admin';
-    }
-
+    // overview เดิมไม่มี upcomingTasks / uniqueAssignees / personal
     return {
-      summary: { totalTasks, completedTasks, pendingTasks, completionRate, currentMonthTasks, upcomingTasks, uniqueAssignees },
-      personal: personalNorm,
-      currentUser: state.currentUser || null
+      summary: {
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        completionRate,
+        currentMonthTasks,
+        upcomingTasks: 0,
+        uniqueAssignees: 0
+      },
+      personal: null,
+      currentUser: null
     };
   });
 }
 
 function loadUpcomingTasks(){
-  // ถ้ายังไม่ล็อกอินและระบบบังคับ login, ข้าม
-  if (!state.isLoggedIn){
-    return Promise.resolve([]);
-  }
-  const payload = {
-    action:'upcoming',
-    days: state.upcomingDays,
-    scope: 'mine',
-    idToken: state.profile?.idToken || ''
-  };
-  return jsonpRequest(payload)
+  const days = state.upcomingDays;
+  return jsonpRequest({ action:'tasks_recent30' })
     .then(res=>{
       if (!res || res.success === false){
-        throw new Error(res?.message || 'upcoming error');
+        throw new Error(res?.message || 'tasks_recent30 error');
       }
-      const list = Array.isArray(res.tasks) ? res.tasks : (Array.isArray(res.data) ? res.data : []);
-      state.notifications = list;
-      setText(els.notificationCount, list.length || 0);
-      renderUpcomingTasks(list);
-      return list;
+      const all = Array.isArray(res.tasks) ? res.tasks : [];
+      const email = String(state.profile?.email || '').toLowerCase();
+
+      const start = new Date(); start.setHours(0,0,0,0);
+      const end = new Date(); end.setDate(end.getDate()+days); end.setHours(0,0,0,0);
+
+      const filtered = all.filter(t=>{
+        if (String(t.completed||'')==='Yes') return false;
+        const dueStr = t.dueDate;
+        if (!dueStr || dueStr==='No Due Date') return false;
+        const due = new Date(`${dueStr}T00:00:00+07:00`);
+        if (isNaN(due)) return false;
+        due.setHours(0,0,0,0);
+        if (due < start || due > end) return false;
+        if (state.isLoggedIn){
+          return String(t.assigneeEmail||'').toLowerCase() === email;
+        }
+        return true;
+      }).map(t=>{
+        const d = (()=> {
+          const due = new Date(`${t.dueDate}T00:00:00+07:00`);
+          const today = new Date(); today.setHours(0,0,0,0); due.setHours(0,0,0,0);
+          return Math.round((due - today)/(24*60*60*1000));
+        })();
+        return { ...t, daysUntilDue: String(d) };
+      }).sort((a,b)=>{
+        const da = Number(a.daysUntilDue); const db = Number(b.daysUntilDue);
+        return da - db;
+      });
+
+      state.notifications = filtered;
+      setText(els.notificationCount, filtered.length || 0);
+      renderUpcomingTasks(filtered);
+      return filtered;
     })
     .catch(err=>{
       console.error('Upcoming error:', err);
@@ -702,12 +680,8 @@ function loadSecureData(){
   return Promise.all([
     fetchAllTasks(),
     fetchUserStats()
-  ]).then(([tasksResult, stats])=>{
-    state.tasks = tasksResult.tasks || [];
-    if (tasksResult.currentUser){
-      state.currentUser = tasksResult.currentUser;
-      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
-    }
+  ]).then(([tasks, stats])=>{
+    state.tasks = tasks;
     state.userStats = stats;
     renderTasks(state.tasks);
     renderUserStats(stats);
@@ -718,40 +692,36 @@ function loadSecureData(){
 }
 
 function fetchAllTasks(){
-  return jsonpRequest({
-    action:'tasks',
-    scope:'mine',
-    idToken: state.profile?.idToken || ''
-  }).then(res=>{
+  // ใช้ tasks_recent30 แล้วกรองเฉพาะของฉันจาก email (เพราะยังไม่มี endpoint tasks/mine)
+  return jsonpRequest({ action:'tasks_recent30' }).then(res=>{
     if (!res || res.success === false){
-      throw new Error(res?.message || 'tasks error');
+      throw new Error(res?.message || 'tasks_recent30 error');
     }
-    const tasks = Array.isArray(res.tasks) ? res.tasks : (Array.isArray(res.data) ? res.data : []);
-    return { tasks, currentUser: res.currentUser || null };
+    const all = Array.isArray(res.tasks) ? res.tasks : [];
+    const email = String(state.profile?.email || '').toLowerCase();
+    const mine = all.filter(t => String(t.assigneeEmail||'').toLowerCase() === email);
+    return mine;
   });
 }
 
 function fetchUserStats(){
+  // ต้องล็อกอิน (API ฝั่งหลังบ้านจะตรวจ idToken ตาม config)
   return jsonpRequest({
-    action:'user_stats',
+    action:'my_stats',
     idToken: state.profile?.idToken || ''
-  }).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'user stats error');
+  }).then(row=>{
+    if (!row || row.success === false){
+      throw new Error(row?.message || 'my_stats error');
     }
-    const d = res || {};
-    const row = (d.email || d.total || d.completed || d.pending || d.rate || d.dueThisMonth || d.dueSoon7d)
-      ? d
-      : (d.data || {});
     const one = {
       assignee: '',
       email: row.email || (state.profile?.email || ''),
-      totalTasks: Number(row.total || row.totalTasks || 0),
-      completedTasks: Number(row.completed || row.completedTasks || 0),
-      pendingTasks: Number(row.pending || row.pendingTasks || 0),
-      completionRate: Number(row.rate || row.completionRate || 0),
-      currentMonthTasks: Number(row.dueThisMonth || row.currentMonthTasks || 0),
-      upcomingTasks: Number(row.dueSoon7d || row.upcomingTasks || 0)
+      totalTasks: Number(row.total || 0),
+      completedTasks: Number(row.completed || 0),
+      pendingTasks: Number(row.pending || 0),
+      completionRate: Number(row.rate || 0),
+      currentMonthTasks: Number(row.dueThisMonth || 0),
+      upcomingTasks: Number(row.dueSoon7d || 0)
     };
     return [one];
   });
@@ -771,27 +741,12 @@ function renderDashboard(data){
   setText(els.stats.month, summary.currentMonthTasks ?? 0);
   setText(els.stats.completionRate, completion);
 
-  state.personalStats = data?.personal || null;
-  if (data?.currentUser){
-    state.currentUser = data.currentUser;
-  }
-  state.isAdmin = state.currentUser ? String(state.currentUser.level || '').trim().toLowerCase() === 'admin' : state.isAdmin;
-  updateAdminUI();
-
+  // API ปัจจุบันไม่มี personal summary → ซ่อน/รีเซ็ต
+  state.personalStats = null;
   if (els.statsPersonal.container){
-    if (state.personalStats){
-      els.statsPersonal.container.classList.remove('hidden');
-      setText(els.headerTotals.myTasks, state.personalStats.totalTasks || 0);
-      setText(els.headerTotals.myUpcoming, state.personalStats.upcomingTasks || 0);
-      setText(els.statsPersonal.completed, state.personalStats.completedTasks || 0);
-      setText(els.statsPersonal.pending, state.personalStats.pendingTasks || 0);
-      setText(els.statsPersonal.month, state.personalStats.currentMonthTasks || 0);
-      setText(els.statsPersonal.upcoming, state.personalStats.upcomingTasks || 0);
-    } else {
-      els.statsPersonal.container.classList.add('hidden');
-      setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
-      setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
-    }
+    els.statsPersonal.container.classList.add('hidden');
+    setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
+    setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
   }
 }
 
@@ -830,7 +785,7 @@ function renderUpcomingTasks(list){
             ${task.daysUntilDue==='0' ? 'วันนี้' : `อีก ${task.daysUntilDue} วัน`}
           </span>
         </div>
-        <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee)}</p>
+        <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || '')}</p>
         <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-blue-500">event</span>
@@ -894,7 +849,6 @@ function applyTaskFilters(){
     return haystack.some(text => text.includes(search));
   });
 
-  // Sort tasks from newest to oldest (reverse chronological)
   filtered.sort((a,b)=>{
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
@@ -1062,7 +1016,7 @@ function handleUpdateStatus(taskId){
   if (!confirmDone) return;
   showLoading(true);
   jsonpRequest({
-    action: 'update_status',
+    action: 'update_status', // อยู่ในกลุ่ม admin/guard หลังบ้าน
     taskId,
     status: 'เสร็จสมบูรณ์',
     idToken: state.profile?.idToken || ''
@@ -1109,20 +1063,16 @@ function showNotifications(){
 /* ============================ Utils ============================ */
 function formatThaiDate(dateString){
   if (!dateString || dateString === 'No Due Date') return 'ไม่มีวันครบกำหนด';
-  
   let date;
   if (dateString instanceof Date){
     date = dateString;
   } else {
     date = new Date(dateString + 'T00:00:00+07:00');
   }
-  
   if (isNaN(date)) return dateString;
-  
   const day = date.getDate();
   const month = THAI_MONTHS[date.getMonth()];
   const year = date.getFullYear() + 543;
-  
   return `${day} ${month} ${year}`;
 }
 
@@ -1135,7 +1085,6 @@ function formatDueMeta_(dueDate){
   today.setHours(0,0,0,0);
   due.setHours(0,0,0,0);
   const diff = Math.round((due - today)/(24*60*60*1000));
-  
   if (diff === 0) return '(ครบกำหนดวันนี้)';
   if (diff === 1) return '(พรุ่งนี้)';
   if (diff === -1) return '(เมื่อวาน)';
@@ -1185,7 +1134,6 @@ function jsonpRequest(params, retryCount = 0){
     let timeoutId = null;
     let isResolved = false;
     
-    // Set timeout with exponential backoff
     const timeout = baseTimeout * Math.pow(1.5, retryCount);
     timeoutId = setTimeout(()=>{
       if (!isResolved){
@@ -1206,7 +1154,6 @@ function jsonpRequest(params, retryCount = 0){
         clearTimeout(timeoutId);
         timeoutId = null;
       }
-      // Delay cleanup to allow late responses
       setTimeout(()=>{
         if (window[callbackName]){
           delete window[callbackName];
@@ -1217,7 +1164,6 @@ function jsonpRequest(params, retryCount = 0){
       }, 1000);
     }
     
-    // Set up callback
     window[callbackName] = data=>{
       if (!isResolved){
         isResolved = true;
@@ -1243,7 +1189,6 @@ function jsonpRequest(params, retryCount = 0){
       }
     };
     
-    // Add script to document
     document.body.appendChild(script);
   });
 }
