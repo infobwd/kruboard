@@ -8,7 +8,7 @@ const APP_CONFIG = (() => {
   const api = document.querySelector('meta[name="kru-api-base"]')?.content?.trim();
   const liffId = document.querySelector('meta[name="kru-liff-id"]')?.content?.trim();
   return {
-    scriptUrl: api || 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
+    scriptUrl: api || 'https://script.google.com/macros/s/AKfycbxD9lO5R_xFFKPp0e0llgoKtbXkr0upnZd3_GU8L0Ze308kITEENaPjK1PvvfkgO8iy/exec',
     liffId: liffId || '2006490627-3NpRPl0G'
   };
 })();
