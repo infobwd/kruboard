@@ -1,11 +1,11 @@
-/* KruBoard Frontend - Updated with Fetch API, Cache Support & Multi-Assignee Modal */
+/* KruBoard Frontend - Updated with Fetch API & Cache Support */
 
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbxD9lO5R_xFFKPp0e0llgoKtbXkr0upnZd3_GU8L0Ze308kITEENaPjK1PvvfkgO8iy/exec',
   liffId: '2006490627-3NpRPl0G',
-  requestTimeout: 30000,
+  requestTimeout: 30000,  // 30 seconds
   retryAttempts: 2,
-  retryDelay: 1000
+  retryDelay: 1000  // 1 second
 };
 
 const state = {
@@ -37,10 +37,11 @@ const CLIENT_CACHE_KEYS = {
 };
 
 const CLIENT_CACHE_TTL = {
-  dashboard: 2 * 60 * 1000,
-  upcoming: 60 * 1000
+  dashboard: 2 * 60 * 1000, // 2 minutes
+  upcoming: 60 * 1000        // 1 minute
 };
 
+// Element cache
 const els = {
   navItems: [],
   pages: {},
@@ -96,13 +97,13 @@ const els = {
   cancelModalBtn: null,
   submitTaskBtn: null,
   taskNameInput: null,
-  taskAssigneeContainer: null,
+  taskAssigneeInput: null,
   taskDueDateInput: null,
   taskNotesInput: null,
-  quickDueButtons: [],
-  availableUsers: []
+  quickDueButtons: []
 };
 
+// Initialize
 document.addEventListener('DOMContentLoaded', init);
 
 function init(){
@@ -111,6 +112,7 @@ function init(){
   initModalElements();
   updateProfileNavAvatar();
   
+  // Add loading text element
   if (els.loadingToast){
     const existing = els.loadingToast.querySelector('span:last-child');
     els.loadingText = existing || document.createElement('span');
@@ -134,6 +136,75 @@ function init(){
     });
 }
 
+/** =========================================================
+ * MODERN FETCH API - Replaces JSONP
+ * ======================================================= **/
+
+// Replace apiRequest Fetch implementation with JSONP
+// async function apiRequest(action, params = {}, options = {}) {
+//   const { timeout = APP_CONFIG.requestTimeout, retryCount = 0, maxRetries = APP_CONFIG.retryAttempts } = options;
+  
+//   const payload = { action, ...params };
+//   if (state.profile?.idToken) payload.idToken = state.profile.idToken;
+//   if (state.apiKey && (action.includes('sync') || action.includes('analyze'))) {
+//     payload.pass = state.apiKey;
+//   }
+
+//   return new Promise((resolve, reject) => {
+//     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+//     let script;
+
+//     const tidyUp = () => {
+//       if (script && script.parentNode){
+//         script.parentNode.removeChild(script);
+//       }
+//       script = null;
+//       delete window[callbackName];
+//     };
+    
+//     // Set timeout
+//     const timeoutId = setTimeout(() => {
+//       tidyUp();
+//       const err = new Error('Request timeout');
+//       err.name = 'AbortError';
+//       reject(err);
+//     }, timeout);
+
+//     // Global callback
+//     window[callbackName] = (data) => {
+//       clearTimeout(timeoutId);
+//       tidyUp();
+      
+//       if (!data.success && retryCount < maxRetries) {
+//         console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
+//         setTimeout(() => {
+//           apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
+//             .then(resolve)
+//             .catch(reject);
+//         }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
+//       } else {
+//         resolve(data);
+//       }
+//     };
+
+//     // Create script tag
+//     script = document.createElement('script');
+//     script.async = true;
+//     script.dataset.jsonp = callbackName;
+//     const queryParams = new URLSearchParams({ 
+//       ...payload, 
+//       callback: callbackName 
+//     });
+//     script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
+//     script.onerror = () => {
+//       clearTimeout(timeoutId);
+//       tidyUp();
+//       reject(new Error('Script loading failed'));
+//     };
+//     document.head.appendChild(script);
+//   });
+// }
+
 async function apiRequest(action, params = {}, options = {}) {
   const {
     timeout = APP_CONFIG.requestTimeout,
@@ -147,12 +218,13 @@ async function apiRequest(action, params = {}, options = {}) {
     payload.pass = state.apiKey;
   }
 
+  // --- 1) ลอง Fetch ก่อน (ถ้า CORS เปิดจะสำเร็จ) ---
   try {
     const controller = new AbortController();
     const t = setTimeout(()=> controller.abort(new Error('Request timeout')), timeout);
     const url = `${APP_CONFIG.scriptUrl}`;
     const res = await fetch(url, {
-      method: 'POST',
+      method: 'POST', // แนะนำ POST สำหรับ Apps Script JSON
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -168,9 +240,10 @@ async function apiRequest(action, params = {}, options = {}) {
     }
     return data;
   } catch (e) {
-    // Fallback to JSONP
+    // ถ้าเป็น CORS/HTTP/timeout ค่อย fallback เป็น JSONP
   }
 
+  // --- 2) Fallback: JSONP (เหมือนเดิม แต่เพิ่ม retry ตอน script.onerror) ---
   return new Promise((resolve, reject) => {
     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     let script;
@@ -225,6 +298,11 @@ async function apiRequest(action, params = {}, options = {}) {
     document.head.appendChild(script);
   });
 }
+
+
+/** =========================================================
+ * FAST CACHED ENDPOINTS
+ * ======================================================= **/
 
 async function loadPublicData(){
   const cachedDashboard = readClientCache('dashboard');
@@ -297,7 +375,7 @@ async function loadPublicData(){
 async function fetchDashboardCached(){
   return apiRequest('dashboard_cached', {}, { 
     maxRetries: 1,
-    timeout: 10000
+    timeout: 10000  // Fast timeout for cache
   });
 }
 
@@ -383,7 +461,6 @@ function writeClientCache(key, data){
     console.warn('Client cache write failed:', err);
   }
 }
-
 async function loadSecureData(){
   showLoading(true, 'โหลดข้อมูลของคุณ...');
 
@@ -400,12 +477,12 @@ async function loadSecureData(){
       throw new Error(tasksResult?.message || 'tasks error');
     }
 
-    state.tasks = tasksResult.data || [];
-    if (tasksResult.currentUser){
-      state.currentUser = tasksResult.currentUser;
-      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
-    }
-    updateProfileNavAvatar();
+  state.tasks = tasksResult.data || [];
+  if (tasksResult.currentUser){
+    state.currentUser = tasksResult.currentUser;
+    state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
+  }
+  updateProfileNavAvatar();
 
     const stats = statsPromise.data || [];
     state.userStats = Array.isArray(stats) ? stats : [];
@@ -429,6 +506,10 @@ async function fetchUserStatsCached(){
     timeout: 20000
   });
 }
+
+/** =========================================================
+ * UI RENDERING FUNCTIONS
+ * ======================================================= **/
 
 function renderDashboard(data){
   if (!data) return;
@@ -470,6 +551,7 @@ function renderDashboard(data){
     }
   }
 
+  // Show cache status badge
   if (data.cached){
     const badge = document.querySelector('#dashboardCacheStatus');
     if (badge){
@@ -745,6 +827,9 @@ function renderUserStats(stats){
   els.userStatsContainer.innerHTML = html;
 }
 
+// [Continue with remaining functions: cachePages, bindUI, initModalElements, openTaskModal, closeTaskModal, handleTaskFormSubmit, etc.]
+// [All event handlers, modal functions, and utility functions remain the same as before, but updated to use apiRequest instead of jsonpRequest]
+
 function cachePages(){
   const pages = Array.from(document.querySelectorAll('.page'));
   pages.forEach(page => {
@@ -767,7 +852,6 @@ function bindUI(){
         return;
       }
       switchPage(pageId);
-      updateAdminUI();
       
       if (pageId === 'tasksPage'){
         setTimeout(addSyncButton, 100);
@@ -872,11 +956,10 @@ function initModalElements(){
   els.cancelModalBtn = document.getElementById('cancelModalBtn');
   els.submitTaskBtn = document.getElementById('submitTaskBtn');
   els.taskNameInput = document.getElementById('taskName');
-  els.taskAssigneeContainer = document.getElementById('taskAssigneeContainer');
+  els.taskAssigneeInput = document.getElementById('taskAssignee');
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
   els.quickDueButtons = Array.from(document.querySelectorAll('[data-quick-due]'));
-  
   if (els.taskDueDateInput){
     els.taskDueDateInput.addEventListener('input', ()=> updateQuickDueActive(null));
   }
@@ -893,102 +976,20 @@ function initModalElements(){
   if (els.closeModalBtn) els.closeModalBtn.addEventListener('click', closeTaskModal);
   if (els.cancelModalBtn) els.cancelModalBtn.addEventListener('click', closeTaskModal);
   if (els.taskForm) els.taskForm.addEventListener('submit', handleTaskFormSubmit);
-  
   if (els.taskModal){
     els.taskModal.addEventListener('click', (evt)=>{
-      if (evt.target === els.taskModal || evt.target.classList.contains('modal-overlay')) {
-        closeTaskModal();
-      }
+      if (evt.target === els.taskModal) closeTaskModal();
     });
   }
-  
   updateQuickDueActive(null);
-  loadAvailableAssignees_();
-}
-
-async function loadAvailableAssignees_(){
-  try{
-    const res = await apiRequest('get_active_users', {}, { maxRetries: 1 });
-    
-    if (!res || res.success === false){
-      console.warn('Failed to load assignees:', res?.message);
-      return;
-    }
-    
-    els.availableUsers = Array.isArray(res.data) ? res.data : [];
-    renderAssigneeSelector();
-  }catch(err){
-    console.error('Load assignees error:', err);
-  }
-}
-
-function renderAssigneeSelector(){
-  const container = els.taskAssigneeContainer;
-  if (!container) return;
-  
-  if (!els.availableUsers.length){
-    container.innerHTML = '<p class="text-xs text-red-500">ไม่พบผู้ใช้งาน</p>';
-    return;
-  }
-  
-  const html = els.availableUsers.map(user => `
-    <label class="flex items-center p-2 rounded-lg hover:bg-blue-50 cursor-pointer transition">
-      <input 
-        type="checkbox" 
-        class="assignee-checkbox" 
-        value="${escapeAttr(user.email)}"
-        data-name="${escapeAttr(user.name || user.email)}"
-      />
-      <span class="ml-3 text-sm text-gray-700">
-        ${escapeHtml(user.name || user.email)}
-      </span>
-      <span class="ml-auto text-xs text-gray-400">
-        ${escapeHtml(user.email)}
-      </span>
-    </label>
-  `).join('');
-  
-  container.innerHTML = `
-    <div class="space-y-2">
-      ${html}
-    </div>
-  `;
-  
-  const checkboxes = container.querySelectorAll('.assignee-checkbox');
-  checkboxes.forEach(cb => {
-    cb.addEventListener('change', updateSelectedAssignees);
-  });
-}
-
-function getSelectedAssignees_(){
-  const container = els.taskAssigneeContainer;
-  if (!container) return [];
-  
-  const checkboxes = container.querySelectorAll('.assignee-checkbox:checked');
-  return Array.from(checkboxes).map(cb => ({
-    email: cb.value,
-    name: cb.getAttribute('data-name')
-  }));
-}
-
-function updateSelectedAssignees(){
-  const selected = getSelectedAssignees_();
-  console.log('Selected assignees:', selected);
 }
 
 function openTaskModal(){
   if (!els.taskModal) return;
   els.taskModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  
-  if (window.innerWidth < 768){
-    els.taskModal.classList.add('mobile-modal-open');
-    document.documentElement.style.overflow = 'hidden';
-  }
-  
   if (els.taskForm) els.taskForm.reset();
   updateQuickDueActive(null);
-  
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -996,18 +997,12 @@ function openTaskModal(){
     const dd = String(today.getDate()).padStart(2, '0');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
   }
-  
-  const checkboxes = els.taskAssigneeContainer?.querySelectorAll('.assignee-checkbox');
-  if (checkboxes) checkboxes.forEach(cb => cb.checked = false);
-  
   if (els.taskNameInput) els.taskNameInput.focus();
 }
 
 function closeTaskModal(){
   if (els.taskModal) els.taskModal.classList.add('hidden');
-  if (els.taskModal) els.taskModal.classList.remove('mobile-modal-open');
   document.body.style.overflow = '';
-  document.documentElement.style.overflow = '';
   updateQuickDueActive(null);
 }
 
@@ -1048,66 +1043,42 @@ async function handleTaskFormSubmit(evt){
   }
   
   const name = (els.taskNameInput?.value || '').trim();
+  const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
   const notes = (els.taskNotesInput?.value || '').trim();
-  const selectedAssignees = getSelectedAssignees_();
   
   if (!name){
     toastInfo('กรุณากรอกชื่องาน');
     return;
   }
   
-  if (!selectedAssignees.length){
-    toastInfo('กรุณาเลือกผู้รับผิดชอบอย่างน้อย 1 คน');
-    return;
-  }
-  
   showModalLoading(true);
   closeTaskModal();
   
-  let successCount = 0;
-  let failCount = 0;
-  
-  for (const assignee of selectedAssignees){
-    try{
-      const res = await apiRequest('web_create_task', {
-        name,
-        assigneeEmail: assignee.email,
-        dueDate,
-        notes
-      }, { maxRetries: 2 });
-      
-      if (!res || res.success === false){
-        throw new Error(res?.message || 'create task error');
-      }
-      
-      successCount++;
-    }catch(err){
-      console.error(`Failed for ${assignee.email}:`, err);
-      failCount++;
+  try{
+    const res = await apiRequest('web_create_task', {
+      name,
+      assigneeEmail,
+      dueDate,
+      notes
+    }, { maxRetries: 2 });
+    
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'create task error');
     }
+    
+    toastInfo('✓ เพิ่มงานใหม่สำเร็จ');
+    await Promise.all([loadSecureData(), loadPublicData()]);
+  }catch(err){
+    handleDataError(err, 'ไม่สามารถเพิ่มงานใหม่ได้');
+  }finally{
+    showModalLoading(false);
   }
-  
-  const msg = successCount > 0 
-    ? `✓ เพิ่มงานสำเร็จ ${successCount} คน${failCount ? ` (ล้มเหลว ${failCount} คน)` : ''}`
-    : '❌ เพิ่มงานไม่สำเร็จ';
-  
-  toastInfo(msg);
-  await Promise.all([loadSecureData(), loadPublicData()]);
-  showModalLoading(false);
 }
 
 function addSyncButton(){
   const tasksPage = els.tasksPage;
   if (!tasksPage) return;
-  
-  if (els.addTaskBtn){
-    els.addTaskBtn.classList.remove('hidden');
-  }
-  
-  if (els.fabBtn){
-    els.fabBtn.classList.add('hidden');
-  }
   
   let syncSection = document.getElementById('syncAdminSection');
   if (!syncSection && state.isAdmin && state.apiKey){
@@ -1262,16 +1233,12 @@ function addAdminOptions(){
 }
 
 function updateAdminUI(){
-  const currentPageId = Array.from(Object.values(els.pages)).find(p => p.classList.contains('active'))?.id;
-  
   if (els.addTaskBtn){
-    const shouldShow = state.isLoggedIn && currentPageId === 'tasksPage';
-    els.addTaskBtn.classList.toggle('hidden', !shouldShow);
-  }
-  
-  if (els.fabBtn){
-    const shouldHideFab = currentPageId === 'tasksPage';
-    els.fabBtn.classList.toggle('hidden', shouldHideFab);
+    if (state.isLoggedIn){
+      els.addTaskBtn.classList.remove('hidden');
+    } else {
+      els.addTaskBtn.classList.add('hidden');
+    }
   }
 }
 
@@ -1280,90 +1247,18 @@ function showNotifications(){
     toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
     return;
   }
-  
   if (!state.notifications.length){
     toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
     return;
   }
-  
-  const notifModal = document.createElement('div');
-  notifModal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-  notifModal.id = 'notificationModal';
-  
-  const tasks = state.notifications.slice(0, 10);
-  const remaining = state.notifications.length - tasks.length;
-  
-  const taskHtml = tasks.map(task => {
+  const lines = state.notifications.slice(0, 5).map(task=>{
     const thaiDate = formatThaiDate(task.dueDate);
     const meta = formatDueMeta_(task.dueDate);
-    const isOverdue = task.daysUntilDue && Number(task.daysUntilDue) < 0;
-    const isToday = task.daysUntilDue === '0';
-    
-    const badgeClass = isOverdue 
-      ? 'bg-red-100 text-red-700' 
-      : isToday 
-      ? 'bg-orange-100 text-orange-700' 
-      : 'bg-blue-100 text-blue-700';
-    
-    return `
-      <div class="bg-white rounded-lg p-4 border-l-4 border-blue-500 shadow-sm">
-        <div class="flex justify-between items-start">
-          <div class="flex-1">
-            <h4 class="font-semibold text-gray-800 text-sm">${escapeHtml(task.name)}</h4>
-            <p class="text-xs text-gray-500 mt-1">${escapeHtml(task.assignee || 'ไม่ระบุ')}</p>
-          </div>
-          <span class="text-xs font-medium px-2 py-1 rounded-full ${badgeClass}">
-            ${isToday ? 'วันนี้' : meta}
-          </span>
-        </div>
-        <div class="flex items-center mt-2 text-xs text-gray-600">
-          <span class="material-icons text-sm mr-1 text-blue-500">event</span>
-          ${escapeHtml(thaiDate)}
-        </div>
-      </div>
-    `;
-  }).join('');
-  
-  notifModal.innerHTML = `
-    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
-      <div class="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-2xl flex items-center justify-between">
-        <h3 class="font-bold text-lg flex items-center">
-          <span class="material-icons mr-2">notifications_active</span>
-          งานที่กำลังจะถึงกำหนด
-        </h3>
-        <button id="closeNotifBtn" class="text-white hover:bg-white hover:bg-opacity-20 rounded-full w-8 h-8 flex items-center justify-center">
-          <span class="material-icons">close</span>
-        </button>
-      </div>
-      
-      <div class="p-4 space-y-3">
-        ${taskHtml}
-        ${remaining > 0 ? `
-          <div class="bg-gray-50 rounded-lg p-3 text-center text-sm text-gray-600">
-            … และอีก <strong>${remaining}</strong> งาน
-          </div>
-        ` : ''}
-      </div>
-      
-      <div class="border-t bg-gray-50 p-4 rounded-b-2xl">
-        <button id="closeNotifBtnFooter" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium transition">
-          ปิด
-        </button>
-      </div>
-    </div>
-  `;
-  
-  document.body.appendChild(notifModal);
-  
-  const close = () => {
-    notifModal.remove();
-  };
-  
-  document.getElementById('closeNotifBtn').addEventListener('click', close);
-  document.getElementById('closeNotifBtnFooter').addEventListener('click', close);
-  notifModal.addEventListener('click', (e) => {
-    if (e.target === notifModal) close();
+    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
   });
+  const remaining = state.notifications.length - lines.length;
+  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
+  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
 }
 
 async function handleUpdateStatus(taskId){
@@ -1621,7 +1516,6 @@ function updateProfileNavAvatar(){
     icon.classList.remove('hidden');
   }
 }
-
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
