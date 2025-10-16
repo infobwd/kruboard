@@ -175,12 +175,7 @@ async function handleTaskFormSubmit(evt){
   evt.preventDefault();
   
   if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบก่อน');
-    return;
-  }
-  
-  if (!state.isAdmin){
-    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    toastInfo('กรุณาเข้าสู่ระบบผ่าน LINE ก่อน');
     return;
   }
   
@@ -199,7 +194,7 @@ async function handleTaskFormSubmit(evt){
   
   try{
     const res = await jsonpRequest({
-      action:'asana_create_task',
+      action:'web_create_task',  // Changed endpoint
       name,
       assigneeEmail,
       dueDate,
@@ -212,10 +207,10 @@ async function handleTaskFormSubmit(evt){
       throw new Error(res?.message || 'create task error');
     }
     
-    toastInfo('สร้างงานใหม่สำเร็จ');
+    toastInfo('✓ เพิ่มงานใหม่สำเร็จ');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
-    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
+    handleDataError(err, 'ไม่สามารถเพิ่มงานใหม่ได้');
   }finally{
     showModalLoading(false);
   }
@@ -858,14 +853,274 @@ function parseTaskDue_(value){
   return date.getTime();
 }
 
+/**
+ * UPDATE: updateAdminUI - Show add button for all logged-in users
+ * Changed: Now shows for all logged-in users, not just admins
+ */
 function updateAdminUI(){
   if (els.addTaskBtn){
-    if (state.isLoggedIn && state.isAdmin){
+    if (state.isLoggedIn){
       els.addTaskBtn.classList.remove('hidden');
     } else {
       els.addTaskBtn.classList.add('hidden');
     }
   }
+}
+
+/**
+ * NEW: Add sync button handler for admins
+ */
+function addSyncButton(){
+  const tasksPage = els.tasksPage;
+  if (!tasksPage) return;
+  
+  let syncSection = document.getElementById('syncAdminSection');
+  if (!syncSection && state.isAdmin && state.apiKey){
+    syncSection = document.createElement('div');
+    syncSection.id = 'syncAdminSection';
+    syncSection.className = 'bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-300 rounded-xl p-4 mb-4 flex items-center justify-between';
+    syncSection.innerHTML = `
+      <div class="flex items-center space-x-3">
+        <span class="material-icons text-blue-600 text-2xl">cloud_sync</span>
+        <div>
+          <h3 class="font-semibold text-gray-800">ตัวเลือกผู้ดูแลระบบ</h3>
+          <p class="text-xs text-gray-600">ซิงค์จาก Asana หรือวิเคราะห์ภาระงาน</p>
+        </div>
+      </div>
+      <div class="flex space-x-2">
+        <button id="btnSyncRecent" class="flex items-center space-x-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition">
+          <span class="material-icons text-sm">sync</span>
+          <span>ซิงค์ (14 วัน)</span>
+        </button>
+        <button id="btnAnalyzeRisk" class="flex items-center space-x-1 bg-purple-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-purple-700 transition">
+          <span class="material-icons text-sm">analytics</span>
+          <span>วิเคราะห์</span>
+        </button>
+      </div>
+    `;
+    
+    const firstChild = tasksPage.firstChild;
+    if (firstChild){
+      tasksPage.insertBefore(syncSection, firstChild);
+    } else {
+      tasksPage.appendChild(syncSection);
+    }
+    
+    const btnSync = document.getElementById('btnSyncRecent');
+    if (btnSync){
+      btnSync.addEventListener('click', handleAdminSync);
+    }
+    
+    const btnAnalyze = document.getElementById('btnAnalyzeRisk');
+    if (btnAnalyze){
+      btnAnalyze.addEventListener('click', handleAdminAnalyze);
+    }
+  } else if (syncSection && (!state.isAdmin || !state.apiKey)){
+    syncSection.remove();
+  }
+}
+
+/**
+ * NEW: Admin sync handler
+ */
+async function handleAdminSync(){
+  if (!state.isAdmin || !state.apiKey){
+    toastInfo('ต้องเป็นผู้ดูแลระบบและมี API Key');
+    return;
+  }
+  
+  const confirmed = confirm('ซิงค์งานล่าสุด 14 วันจาก Asana?\n\nสิ่งนี้อาจใช้เวลาสักครู่...');
+  if (!confirmed) return;
+  
+  showLoading(true);
+  
+  try{
+    const res = await jsonpRequest({
+      action: 'sync_asana_recent_v2',
+      days: 14,
+      force: true,
+      pass: state.apiKey,
+      idToken: state.profile?.idToken || ''
+    });
+    
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'sync failed');
+    }
+    
+    const msg = `✓ ซิงค์สำเร็จ\n━━━━━━━━━\nทั้งหมด: ${res.total}\nสร้างใหม่: ${res.created}\nอัปเดต: ${res.updated}`;
+    toastInfo(msg);
+    
+    await Promise.all([loadSecureData(), loadPublicData()]);
+  }catch(err){
+    handleDataError(err, 'ซิงค์ไม่สำเร็จ');
+  }finally{
+    showLoading(false);
+  }
+}
+
+/**
+ * NEW: Admin analyze handler
+ */
+async function handleAdminAnalyze(){
+  if (!state.isAdmin || !state.apiKey){
+    toastInfo('ต้องเป็นผู้ดูแลระบบและมี API Key');
+    return;
+  }
+  
+  const confirmed = confirm('วิเคราะห์ภาระงานและความเสี่ยง?\n\nสิ่งนี้จะอัปเดตชีต Workload');
+  if (!confirmed) return;
+  
+  showLoading(true);
+  
+  try{
+    const res = await jsonpRequest({
+      action: 'analyze_workload_risk_v2',
+      pass: state.apiKey,
+      idToken: state.profile?.idToken || ''
+    });
+    
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'analyze failed');
+    }
+    
+    const msg = `✓ วิเคราะห์สำเร็จ\n━━━━━━━━━\nคน: ${res.totalPeople}\nงานทั้งหมด: ${res.totalTasksAll}\nสัปดาห์นี้: ${res.totalTasksWeek}\n\n✓ ชีต Workload อัปเดตแล้ว`;
+    toastInfo(msg);
+  }catch(err){
+    handleDataError(err, 'วิเคราะห์ไม่สำเร็จ');
+  }finally{
+    showLoading(false);
+  }
+}
+
+/**
+ * NEW: Add admin UI section
+ * Call this when rendering profile page
+ */
+function addAdminOptions(){
+  const profilePage = els.profilePage;
+  if (!profilePage) return;
+  
+  if (state.isLoggedIn && state.isAdmin && state.apiKey){
+    let adminSection = document.getElementById('adminActionsSection');
+    if (!adminSection){
+      adminSection = document.createElement('div');
+      adminSection.id = 'adminActionsSection';
+      adminSection.className = 'bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-300 rounded-2xl shadow-md p-6 mb-4';
+      adminSection.innerHTML = `
+        <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+          <span class="material-icons text-orange-600 mr-2">admin_panel_settings</span>
+          เครื่องมือผู้ดูแลระบบ
+        </h3>
+        <div class="space-y-2">
+          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminSync2">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-blue-600">cloud_download</span>
+              <div class="text-left">
+                <p class="text-gray-800 font-medium">ซิงค์ Asana</p>
+                <p class="text-xs text-gray-500">อัปเดตงานล่าสุด 14 วัน</p>
+              </div>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-purple-600">assessment</span>
+              <div class="text-left">
+                <p class="text-gray-800 font-medium">วิเคราะห์ภาระงาน</p>
+                <p class="text-xs text-gray-500">วิเคราะห์ความเสี่ยงและคะแนน</p>
+              </div>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+        </div>
+      `;
+      
+      const profileContent = profilePage.querySelector('.bg-white.rounded-2xl');
+      if (profileContent && profileContent.nextSibling){
+        profilePage.insertBefore(adminSection, profileContent.nextSibling);
+      } else {
+        profilePage.insertBefore(adminSection, profilePage.firstChild.nextSibling);
+      }
+      
+      const btnSync2 = document.getElementById('btnAdminSync2');
+      if (btnSync2) btnSync2.addEventListener('click', handleAdminSync);
+      
+      const btnAnalyze2 = document.getElementById('btnAdminAnalyze2');
+      if (btnAnalyze2) btnAnalyze2.addEventListener('click', handleAdminAnalyze);
+    }
+  } else {
+    const adminSection = document.getElementById('adminActionsSection');
+    if (adminSection) adminSection.remove();
+  }
+}
+
+/**
+ * UPDATE: renderProfilePage - Add admin options
+ * Add this call at the end of renderProfilePage function
+ */
+// In renderProfilePage, add this at the very end:
+// addAdminOptions();
+
+/**
+ * UPDATE: renderTasksPage - Add sync section for admins
+ * Add this call when rendering tasks page
+ */
+// Call addSyncButton() in renderTasks or when switching to tasksPage
+
+/**
+ * NEW: Update onOpen/bindUI to call new functions
+ */
+// In bindUI(), add these:
+function bindUIExtensions(){
+  // When page switches, call these
+  els.navItems.forEach(item=>{
+    item.addEventListener('click', evt=>{
+      evt.preventDefault();
+      const pageId = item.getAttribute('data-page');
+      if (!state.isLoggedIn && pageId !== 'homePage'){
+        toastInfo('กรุณาเข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียด');
+        return;
+      }
+      switchPage(pageId);
+      
+      // Add admin UI based on current page
+      if (pageId === 'tasksPage'){
+        setTimeout(addSyncButton, 100);
+      }
+      if (pageId === 'profilePage'){
+        setTimeout(addAdminOptions, 100);
+      }
+    });
+  });
+}
+
+/**
+ * UPDATE: Call renderProfilePage with admin options
+ * Replace the existing renderProfilePage function ending with:
+ */
+// After all profile HTML is set, add:
+// addAdminOptions();
+
+/**
+ * NEW: formatWebTask - Format web-created task for display
+ */
+function formatWebTask_(task){
+  return {
+    id: task.id || ('WEB' + Date.now()),
+    gid: task.gid || '',
+    name: task.name || '',
+    assignee: task.assignee || 'ไม่ทราบชื่อ',
+    assigneeEmail: task.assigneeEmail || '',
+    dueDate: task.dueDate || 'No Due Date',
+    dueDateThai: task.dueDateThai || 'ไม่มีวันครบกำหนด',
+    completed: 'No',
+    status: task.status || 'รอดำเนินการ',
+    source: 'WEB',
+    link: '',
+    year: task.year || 'No Due Date',
+    lineUID: task.lineUID || '',
+    createdBy: task.createdBy || 'Unknown'
+  };
 }
 
 function showNotifications(){
