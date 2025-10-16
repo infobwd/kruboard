@@ -126,63 +126,58 @@ function init(){
  * MODERN FETCH API - Replaces JSONP
  * ======================================================= **/
 
-async function apiRequest(action, params = {}, options = {}){
-  const {
-    method = 'POST',
-    timeout = APP_CONFIG.requestTimeout,
-    retryCount = 0,
-    maxRetries = APP_CONFIG.retryAttempts
-  } = options;
-
-  const payload = { action, ...params };
+// Replace apiRequest Fetch implementation with JSONP
+async function apiRequest(action, params = {}, options = {}) {
+  const { timeout = APP_CONFIG.requestTimeout, retryCount = 0, maxRetries = APP_CONFIG.retryAttempts } = options;
   
-  // Add auth if available
-  if (state.profile?.idToken){
-    payload.idToken = state.profile.idToken;
-  }
-  if (state.apiKey && (action.includes('sync') || action.includes('analyze'))){
+  const payload = { action, ...params };
+  if (state.profile?.idToken) payload.idToken = state.profile.idToken;
+  if (state.apiKey && (action.includes('sync') || action.includes('analyze'))) {
     payload.pass = state.apiKey;
   }
 
-  try{
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    const response = await fetch(APP_CONFIG.scriptUrl, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok){
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+  return new Promise((resolve, reject) => {
+    const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    if (!data.success && retryCount < maxRetries){
-      console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
-      await new Promise(r => setTimeout(r, APP_CONFIG.retryDelay * Math.pow(2, retryCount)));
-      return apiRequest(action, params, { ...options, retryCount: retryCount + 1 });
-    }
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      delete window[callbackName];
+      const err = new Error('Request timeout');
+      err.name = 'AbortError';
+      reject(err);
+    }, timeout);
 
-    return data;
-  }catch(error){
-    if (error.name === 'AbortError'){
-      error.message = 'Request timeout - server not responding';
-    }
+    // Global callback
+    window[callbackName] = (data) => {
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      
+      if (!data.success && retryCount < maxRetries) {
+        console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
+        setTimeout(() => {
+          apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
+            .then(resolve)
+            .catch(reject);
+        }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
+      } else {
+        resolve(data);
+      }
+    };
 
-    if (retryCount < maxRetries){
-      console.warn(`Request failed: ${error.message}, retrying... (${retryCount + 1}/${maxRetries})`);
-      await new Promise(r => setTimeout(r, APP_CONFIG.retryDelay * Math.pow(2, retryCount)));
-      return apiRequest(action, params, { ...options, retryCount: retryCount + 1 });
-    }
-
-    throw error;
-  }
+    // Create script tag
+    const script = document.createElement('script');
+    const queryParams = new URLSearchParams({ 
+      ...payload, 
+      callback: callbackName 
+    });
+    script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
+    script.onerror = () => {
+      delete window[callbackName];
+      clearTimeout(timeoutId);
+      reject(new Error('Script loading failed'));
+    };
+    document.head.appendChild(script);
+  });
 }
 
 /** =========================================================
