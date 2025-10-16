@@ -23,13 +23,23 @@ const state = {
   taskPagination: { page:1, pageSize:10, totalPages:1 },
   isAdmin: false,
   apiKey: localStorage.getItem('kruboard_api_key') || '',
-  cacheStatus: { dashboard: null, userStats: null }
+  cacheStatus: { dashboard: null, userStats: null, upcoming: null }
 };
 
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
+
+const CLIENT_CACHE_KEYS = {
+  dashboard: 'kruboard_cache_dashboard_v1',
+  upcoming: 'kruboard_cache_upcoming_v1'
+};
+
+const CLIENT_CACHE_TTL = {
+  dashboard: 2 * 60 * 1000, // 2 minutes
+  upcoming: 60 * 1000        // 1 minute
+};
 
 // Element cache
 const els = {
@@ -69,6 +79,8 @@ const els = {
   refreshBtn: document.getElementById('refreshBtn'),
   fabBtn: document.getElementById('fabBtn'),
   timeFilters: Array.from(document.querySelectorAll('.time-filter')),
+  navProfileAvatar: document.getElementById('navProfileAvatar'),
+  navProfileIcon: document.getElementById('navProfileIcon'),
   nav: Array.from(document.querySelectorAll('.nav-item')),
   notificationBtn: document.getElementById('notificationBtn'),
   taskSearchInput: document.getElementById('taskSearchInput'),
@@ -87,7 +99,8 @@ const els = {
   taskNameInput: null,
   taskAssigneeInput: null,
   taskDueDateInput: null,
-  taskNotesInput: null
+  taskNotesInput: null,
+  quickDueButtons: []
 };
 
 // Initialize
@@ -97,6 +110,7 @@ function init(){
   cachePages();
   bindUI();
   initModalElements();
+  updateProfileNavAvatar();
   
   // Add loading text element
   if (els.loadingToast){
@@ -138,10 +152,19 @@ async function apiRequest(action, params = {}, options = {}) {
 
   return new Promise((resolve, reject) => {
     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let script;
+
+    const tidyUp = () => {
+      if (script && script.parentNode){
+        script.parentNode.removeChild(script);
+      }
+      script = null;
+      delete window[callbackName];
+    };
     
     // Set timeout
     const timeoutId = setTimeout(() => {
-      delete window[callbackName];
+      tidyUp();
       const err = new Error('Request timeout');
       err.name = 'AbortError';
       reject(err);
@@ -150,7 +173,7 @@ async function apiRequest(action, params = {}, options = {}) {
     // Global callback
     window[callbackName] = (data) => {
       clearTimeout(timeoutId);
-      delete window[callbackName];
+      tidyUp();
       
       if (!data.success && retryCount < maxRetries) {
         console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
@@ -165,15 +188,17 @@ async function apiRequest(action, params = {}, options = {}) {
     };
 
     // Create script tag
-    const script = document.createElement('script');
+    script = document.createElement('script');
+    script.async = true;
+    script.dataset.jsonp = callbackName;
     const queryParams = new URLSearchParams({ 
       ...payload, 
       callback: callbackName 
     });
     script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
     script.onerror = () => {
-      delete window[callbackName];
       clearTimeout(timeoutId);
+      tidyUp();
       reject(new Error('Script loading failed'));
     };
     document.head.appendChild(script);
@@ -185,23 +210,67 @@ async function apiRequest(action, params = {}, options = {}) {
  * ======================================================= **/
 
 async function loadPublicData(){
+  const cachedDashboard = readClientCache('dashboard');
+  if (cachedDashboard){
+    state.cacheStatus.dashboard = 'cached-local';
+    const decorated = {
+      ...cachedDashboard,
+      cached: true,
+      cacheSource: cachedDashboard.cacheSource || 'local-cache'
+    };
+    renderDashboard(decorated);
+  }
+
+  const cachedUpcoming = readClientCache('upcoming');
+  if (cachedUpcoming){
+    let sourceList = [];
+    let scopeMatches = true;
+    if (Array.isArray(cachedUpcoming)){
+      sourceList = cachedUpcoming;
+    }else if (cachedUpcoming && typeof cachedUpcoming === 'object'){
+      sourceList = Array.isArray(cachedUpcoming.list) ? cachedUpcoming.list : [];
+      const expectedScope = state.isLoggedIn ? 'mine' : 'public';
+      if (cachedUpcoming.scope && cachedUpcoming.scope !== expectedScope){
+        scopeMatches = false;
+      }
+    }
+    if (scopeMatches && sourceList.length){
+      applyUpcomingData(sourceList, 'local-cache');
+    }
+  }
   showLoading(true, 'โหลดแดชบอร์ด...');
   
   try{
-    const dashboardPromise = fetchDashboardCached();
+    const dashboardPromise = fetchDashboardCached().then(res=>{
+      if (!res || !res.data) return null;
+      const decorated = {
+        ...res.data,
+        cached: Boolean(res.cached || res.data.cached),
+        cacheSource: res.cached ? 'server-cache' : 'network'
+      };
+      writeClientCache('dashboard', decorated);
+      return { decorated, cached: Boolean(res.cached) };
+    });
     const upcomingPromise = loadUpcomingTasks();
     
     const [dashboard] = await Promise.all([dashboardPromise, upcomingPromise]);
     
-    if (dashboard){
+    if (dashboard && dashboard.decorated){
       state.cacheStatus.dashboard = dashboard.cached ? 'cached' : 'computed';
-      renderDashboard(dashboard.data);
+      renderDashboard(dashboard.decorated);
     }
   }catch(error){
     console.warn('Fast load failed, trying standard endpoint:', error.message);
     try{
       const dashboard = await fetchDashboardStats();
-      renderDashboard(dashboard);
+      const decorated = {
+        ...dashboard,
+        cached: Boolean(dashboard.cached),
+        cacheSource: dashboard.cached ? 'server-cache' : 'network'
+      };
+      writeClientCache('dashboard', decorated);
+      state.cacheStatus.dashboard = decorated.cached ? 'cached' : 'computed';
+      renderDashboard(decorated);
     }catch(err){
       handleDataError(err, 'โหลดแดชบอร์ดล้มเหลว');
     }
@@ -240,18 +309,63 @@ async function loadUpcomingTasks(){
     }
 
     const data = Array.isArray(res.data) ? res.data : [];
-    const personal = state.isLoggedIn;
-    state.notifications = personal ? data : [];
-    setText(els.notificationCount, personal ? (data.length || 0) : 0);
-    renderUpcomingTasks(data);
+    applyUpcomingData(data, res.cached ? 'server-cache' : 'network');
+    writeClientCache('upcoming', {
+      list: data,
+      scope: state.isLoggedIn ? 'mine' : 'public'
+    });
     return data;
   }catch(err){
     console.error('Upcoming error:', err);
-    renderUpcomingTasks([]);
+    applyUpcomingData([], 'error');
     return [];
   }
 }
 
+function applyUpcomingData(list, source){
+  const data = Array.isArray(list) ? list : [];
+  const personal = state.isLoggedIn;
+  state.cacheStatus.upcoming = source || null;
+  state.notifications = personal ? data : [];
+  setText(els.notificationCount, personal ? (data.length || 0) : 0);
+  renderUpcomingTasks(data);
+}
+
+function readClientCache(key){
+  const storageKey = CLIENT_CACHE_KEYS[key];
+  if (!storageKey || typeof localStorage === 'undefined') return null;
+  try{
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const ttl = CLIENT_CACHE_TTL[key] || 0;
+    const storedAt = Number(parsed.storedAt || 0);
+    if (ttl && (!storedAt || (Date.now() - storedAt) > ttl)){
+      localStorage.removeItem(storageKey);
+      return null;
+    }
+    return parsed.data;
+  }catch(err){
+    console.warn('Client cache read failed:', err);
+    try{ localStorage.removeItem(storageKey); }catch(_){}
+    return null;
+  }
+}
+
+function writeClientCache(key, data){
+  const storageKey = CLIENT_CACHE_KEYS[key];
+  if (!storageKey || typeof localStorage === 'undefined') return;
+  try{
+    const payload = JSON.stringify({ storedAt: Date.now(), data });
+    localStorage.setItem(storageKey, payload);
+  }catch(err){
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22)){
+      try{ localStorage.removeItem(storageKey); }catch(_){}
+    }
+    console.warn('Client cache write failed:', err);
+  }
+}
 async function loadSecureData(){
   showLoading(true, 'โหลดข้อมูลของคุณ...');
 
@@ -268,11 +382,12 @@ async function loadSecureData(){
       throw new Error(tasksResult?.message || 'tasks error');
     }
 
-    state.tasks = tasksResult.data || [];
-    if (tasksResult.currentUser){
-      state.currentUser = tasksResult.currentUser;
-      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
-    }
+  state.tasks = tasksResult.data || [];
+  if (tasksResult.currentUser){
+    state.currentUser = tasksResult.currentUser;
+    state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
+  }
+  updateProfileNavAvatar();
 
     const stats = statsPromise.data || [];
     state.userStats = Array.isArray(stats) ? stats : [];
@@ -322,6 +437,7 @@ function renderDashboard(data){
   if (data.currentUser){
     state.currentUser = data.currentUser;
   }
+  updateProfileNavAvatar();
   state.isAdmin = state.currentUser ? String(state.currentUser.level || '').trim().toLowerCase() === 'admin' : state.isAdmin;
   
   updateAdminUI();
@@ -748,6 +864,19 @@ function initModalElements(){
   els.taskAssigneeInput = document.getElementById('taskAssignee');
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
+  els.quickDueButtons = Array.from(document.querySelectorAll('[data-quick-due]'));
+  if (els.taskDueDateInput){
+    els.taskDueDateInput.addEventListener('input', ()=> updateQuickDueActive(null));
+  }
+  
+  if (els.quickDueButtons.length){
+    els.quickDueButtons.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const days = Number(btn.dataset.quickDue || '0');
+        applyQuickDueSelection(btn, days);
+      });
+    });
+  }
   
   if (els.closeModalBtn) els.closeModalBtn.addEventListener('click', closeTaskModal);
   if (els.cancelModalBtn) els.cancelModalBtn.addEventListener('click', closeTaskModal);
@@ -757,6 +886,7 @@ function initModalElements(){
       if (evt.target === els.taskModal) closeTaskModal();
     });
   }
+  updateQuickDueActive(null);
 }
 
 function openTaskModal(){
@@ -764,6 +894,7 @@ function openTaskModal(){
   els.taskModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   if (els.taskForm) els.taskForm.reset();
+  updateQuickDueActive(null);
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -771,11 +902,37 @@ function openTaskModal(){
     const dd = String(today.getDate()).padStart(2, '0');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
   }
+  if (els.taskNameInput) els.taskNameInput.focus();
 }
 
 function closeTaskModal(){
   if (els.taskModal) els.taskModal.classList.add('hidden');
   document.body.style.overflow = '';
+  updateQuickDueActive(null);
+}
+
+function applyQuickDueSelection(targetBtn, offsetDays){
+  if (!els.taskDueDateInput) return;
+  const base = new Date();
+  base.setHours(0,0,0,0);
+  const days = Number(offsetDays) || 0;
+  base.setDate(base.getDate() + days);
+  const iso = base.toISOString().slice(0,10);
+  els.taskDueDateInput.value = iso;
+  updateQuickDueActive(targetBtn);
+}
+
+function updateQuickDueActive(activeBtn){
+  if (!Array.isArray(els.quickDueButtons)) return;
+  els.quickDueButtons.forEach(btn=>{
+    if (btn === activeBtn){
+      btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
+    }else{
+      btn.classList.remove('active');
+      btn.setAttribute('aria-pressed', 'false');
+    }
+  });
 }
 
 function showModalLoading(show){
@@ -1123,6 +1280,7 @@ function renderProfilePage(){
     }
   }
   if (!els.profilePage) return;
+  updateProfileNavAvatar();
   if (!state.isLoggedIn || !state.profile){
     els.profilePage.innerHTML = `
       <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
@@ -1155,10 +1313,11 @@ function renderProfilePage(){
   const userRecord = state.currentUser || {};
   const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'Teacher');
   const lineUidLabel = userRecord.lineUID ? `LINE UID: ${userRecord.lineUID}` : '';
+  const avatarSrc = profile.pictureUrl || userRecord.linePictureUrl || userRecord.lineAvatarThumb || userRecord.picture || 'https://via.placeholder.com/100x100.png?text=LINE';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
       <div class="flex items-center space-x-4 mb-6">
-        <img src="${escapeAttr(profile.pictureUrl || 'https://via.placeholder.com/100x100.png?text=LINE')}" alt="avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-100">
+        <img src="${escapeAttr(avatarSrc)}" alt="avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-100">
         <div>
           <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'ผู้ใช้งาน')}</h2>
           <p class="text-xs text-gray-500">${escapeHtml(profile.email || profile.userId || '')}</p>
@@ -1237,6 +1396,31 @@ function renderProfilePage(){
   addAdminOptions();
 }
 
+function updateProfileNavAvatar(){
+  const avatar = els.navProfileAvatar;
+  const icon = els.navProfileIcon;
+  if (!avatar || !icon) return;
+
+  const picture = state.profile?.pictureUrl
+    || state.currentUser?.linePictureUrl
+    || state.currentUser?.lineAvatarThumb
+    || state.currentUser?.picture
+    || '';
+  const displayName = state.profile?.name || state.currentUser?.name || 'Profile';
+
+  if (picture){
+    avatar.src = escapeAttr(picture);
+    avatar.alt = escapeAttr(displayName);
+    avatar.loading = 'lazy';
+    avatar.classList.remove('hidden');
+    icon.classList.add('hidden');
+  } else {
+    avatar.removeAttribute('src');
+    avatar.removeAttribute('loading');
+    avatar.classList.add('hidden');
+    icon.classList.remove('hidden');
+  }
+}
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
