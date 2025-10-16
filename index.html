@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>KruBoard - กระดานรวมงานคุณครู</title>
+
+  <!-- ===== App Config (Front reads these) =====
+    API_BASE_URL: ชี้ไปยัง Apps Script Web App (เช่น https://script.google.com/macros/s/xxx/exec)
+    LIFF_ID: LINE LIFF ID ของโปรเจค (ใช้ liff.init แล้วขอ idToken) -->
+  <meta name="kru-api-base" content="PUT_WEB_APP_URL_HERE" />
+  <meta name="kru-liff-id" content="PUT_LIFF_ID_HERE" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts - Kanit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Material Icons -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+  <!-- LINE LIFF SDK (สำหรับ login เอา idToken ไปเรียก API: my_stats) -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    * { font-family: 'Kanit', sans-serif; }
+    body { padding-bottom: 80px; }
+    .task-card { transition: all 0.3s ease; }
+    .task-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: white; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; border-top: 1px solid #e5e7eb; }
+    .nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; cursor: pointer; transition: all 0.3s ease; color: #9ca3af; text-decoration: none; }
+    .nav-item.active { color: #2563eb; }
+    .nav-item:hover { background: #f3f4f6; }
+    .nav-item .material-icons { font-size: 24px; margin-bottom: 4px; }
+    .nav-item span { font-size: 11px; font-weight: 500; }
+    .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(59, 130, 246, 0.3); border-radius: 50%; border-top-color: #3b82f6; animation: spin 1s ease-in-out infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .header-gradient { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); }
+    .page { display: none; }
+    .page.active { display: block; }
+    .stat-badge { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; background: rgba(255,255,255,0.2); }
+    .fab { position: fixed; bottom: 90px; right: 20px; z-index: 50; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .fab:hover { transform: scale(1.1); }
+    .notification-badge { position: absolute; top: 4px; right: 4px; background: #ef4444; color: white; border-radius: 10px; padding: 2px 6px; font-size: 10px; font-weight: bold; min-width: 18px; text-align: center; }
+    .skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: loading 1.5s ease-in-out infinite; }
+    @keyframes loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  </style>
+</head>
+<body class="bg-gray-50" data-app-ready="false">
+  <!-- ====== Top Header ====== -->
+  <header class="header-gradient text-white shadow-lg sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="bg-white/20 p-2 rounded-xl">
+            <span class="material-icons text-2xl">school</span>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">KruBoard</h1>
+            <p class="text-xs text-blue-100">กระดานรวมงานคุณครู</p>
+          </div>
+        </div>
+
+        <!-- Login Area (Front ↔ Backend: my_stats ต้องใช้ idToken) -->
+        <div class="flex items-center space-x-2">
+          <button id="notificationBtn" class="relative p-2 hover:bg-white/10 rounded-lg transition">
+            <span class="material-icons">notifications</span>
+            <span class="notification-badge" id="notificationCount">0</span>
+          </button>
+
+          <!-- สถานะผู้ใช้ -->
+          <div id="userChip" class="hidden items-center space-x-2 bg-white/20 rounded-full px-3 py-1">
+            <span class="material-icons text-sm">person</span>
+            <span id="userDisplayName" class="text-sm">—</span>
+          </div>
+
+          <!-- ปุ่ม Login / Logout -->
+          <button id="loginBtn" class="p-2 hover:bg-white/10 rounded-lg transition">
+            <span class="material-icons">login</span>
+          </button>
+          <button id="logoutBtn" class="hidden p-2 hover:bg-white/10 rounded-lg transition">
+            <span class="material-icons">logout</span>
+          </button>
+
+          <button id="refreshBtn" class="p-2 hover:bg-white/10 rounded-lg transition" title="รีเฟรชข้อมูลจาก API">
+            <span class="material-icons">refresh</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Stats (Front ↔ Backend: /?action=dashboard_overview) -->
+      <div class="flex items-center space-x-2 mt-3 overflow-x-auto pb-2">
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">assignment</span>
+          <span id="headerTotalTasks">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">schedule</span>
+          <span id="headerUpcomingTasks">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">people</span>
+          <span id="headerTotalUsers">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">check_circle</span>
+          <span id="headerCompletionRate">0%</span>
+        </div>
+        <div class="stat-badge flex-shrink-0 bg-white/25 text-white">
+          <span class="material-icons text-sm mr-1">person</span>
+          <span id="headerMyTasks">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0 bg-white/25 text-white">
+          <span class="material-icons text-sm mr-1">notifications_active</span>
+          <span id="headerMyUpcoming">0</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ====== Main Content ====== -->
+  <main class="max-w-7xl mx-auto">
+    <!-- ===== Home Page ===== -->
+    <div id="homePage" class="page active px-4 py-4">
+      <!-- Upcoming Tasks (Front ↔ Backend: /?action=tasks_recent30 แล้ว filter ฝั่ง front ตาม 7/15/30 วัน) -->
+      <section class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center">
+            <span class="material-icons text-green-600 mr-2">event_available</span>
+            งานที่กำลังจะถึง
+          </h2>
+          <div class="flex space-x-1" id="timeFilterGroup">
+            <button class="time-filter active bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-medium" data-days="7">7 วัน</button>
+            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-xs font-medium" data-days="15">15 วัน</button>
+            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-xs font-medium" data-days="30">30 วัน</button>
+          </div>
+        </div>
+
+        <div id="taskCardsContainer" class="space-y-3" aria-live="polite">
+          <!-- Loading skeleton -->
+          <div class="skeleton h-24 rounded-xl"></div>
+          <div class="skeleton h-24 rounded-xl"></div>
+        </div>
+      </section>
+
+      <!-- Quick Stats Grid (Front ↔ Backend: /?action=dashboard_overview) -->
+      <section class="mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-3 flex items-center">
+          <span class="material-icons text-purple-600 mr-2">assessment</span>
+          สถิติภาพรวม
+        </h2>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-gradient-to-br from-green-400 to-green-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">check_circle</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">เสร็จแล้ว</span>
+            </div>
+            <div class="text-2xl font-bold" id="completedCount">0</div>
+            <div class="text-xs opacity-90">งานที่เสร็จสมบูรณ์</div>
+          </div>
+
+          <div class="bg-gradient-to-br from-orange-400 to-orange-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">pending</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">รอดำเนินการ</span>
+            </div>
+            <div class="text-2xl font-bold" id="pendingCount">0</div>
+            <div class="text-xs opacity-90">งานที่ค้างอยู่</div>
+          </div>
+
+          <div class="bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">today</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">เดือนนี้</span>
+            </div>
+            <div class="text-2xl font-bold" id="monthTaskCount">0</div>
+            <div class="text-xs opacity-90">งานประจำเดือน</div>
+          </div>
+
+          <div class="bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">trending_up</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">ความสำเร็จ</span>
+            </div>
+            <div class="text-2xl font-bold" id="completionRate">0%</div>
+            <div class="text-xs opacity-90">อัตราการทำงาน</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- My Stats (Front ↔ Backend: /?action=my_stats ต้องส่ง idToken หรือ email ที่ backend map ได้) -->
+      <section class="mb-6 hidden" id="personalStatsSection">
+        <h2 class="text-lg font-bold text-gray-800 mb-3 flex items-center">
+          <span class="material-icons text-amber-500 mr-2">insights</span>
+          สถิติของฉัน
+        </h2>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-white rounded-xl p-4 shadow-md border border-amber-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-amber-500 text-2xl">star</span>
+              <span class="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">เสร็จสิ้น</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myCompletedCount">0</div>
+            <div class="text-xs text-gray-500">งานที่ฉันทำเสร็จ</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-rose-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-rose-500 text-2xl">hourglass_bottom</span>
+              <span class="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded-full">รอดำเนินการ</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myPendingCount">0</div>
+            <div class="text-xs text-gray-500">งานที่ยังต้องทำ</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-sky-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-sky-500 text-2xl">event_note</span>
+              <span class="text-xs bg-sky-100 text-sky-700 px-2 py-1 rounded-full">เดือนนี้</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myMonthTaskCount">0</div>
+            <div class="text-xs text-gray-500">งานที่กำหนดในเดือนนี้</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-emerald-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-emerald-500 text-2xl">alarm</span>
+              <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">ใกล้ครบกำหนด</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myUpcomingCount">0</div>
+            <div class="text-xs text-gray-500">งานที่จะถึงกำหนด</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- System Info (static) -->
+      <section class="mb-6">
+        <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4">
+          <div class="flex items-start space-x-3">
+            <span class="material-icons text-blue-600 text-2xl">info</span>
+            <div class="flex-1">
+              <h3 class="font-semibold text-gray-800 mb-1">ระบบคำนวณภาระงาน</h3>
+              <p class="text-sm text-gray-600 leading-relaxed">
+                งานสอน=1.8 | ประชุม=0.8 | กิจกรรม=1.2 | วิชาการ=2.0 | โครงการ=1.5 | บริหาร=2.2
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Tasks Page ===== -->
+    <div id="tasksPage" class="page px-4 py-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-800">งานของฉัน</h2>
+        <!-- ตอนนี้ backend ยังไม่รองรับ create → ซ่อน -->
+        <button id="addTaskBtn" class="hidden flex items-center space-x-1 bg-green-600 text-white px-3 py-2 rounded-lg text-sm shadow-sm hover:bg-green-700">
+          <span class="material-icons text-sm">add_task</span>
+          <span>เพิ่มงานใหม่</span>
+        </button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-3 mb-4">
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div class="flex items-center bg-gray-100 px-3 py-2 rounded-lg flex-1">
+            <span class="material-icons text-gray-400 mr-2">search</span>
+            <input id="taskSearchInput" type="search" class="bg-transparent outline-none text-sm w-full" placeholder="ค้นหาด้วยชื่องาน ผู้รับผิดชอบ หรือคำสำคัญ" />
+          </div>
+          <div class="flex items-center space-x-2">
+            <label for="taskStatusFilter" class="text-xs text-gray-500 uppercase tracking-wide">สถานะ</label>
+            <select id="taskStatusFilter" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="all">ทั้งหมด</option>
+              <option value="pending">รอดำเนินการ</option>
+              <option value="completed">เสร็จสมบูรณ์</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="allTasksContainer" class="space-y-3" aria-live="polite"></div>
+
+      <div class="flex items-center justify-between mt-4" id="taskPagination">
+        <button id="taskPaginationPrev" class="flex items-center space-x-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span class="material-icons text-sm">chevron_left</span>
+          <span>ก่อนหน้า</span>
+        </button>
+        <span class="text-sm text-gray-600" id="taskPaginationInfo">หน้า 1/1</span>
+        <button id="taskPaginationNext" class="flex items-center space-x-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>ถัดไป</span>
+          <span class="material-icons text-sm">chevron_right</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== Teachers Page (ถ้าต้องการรวมสถิติรายคน ต้องมี endpoint แยก; ตอนนี้ซ่อน/ให้ app.js จัดการ) ===== -->
+    <div id="teachersPage" class="page px-4 py-4">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">สถิติครูทั้งหมด</h2>
+      <div id="userStatsContainer" class="space-y-2"></div>
+    </div>
+
+    <!-- ===== Profile Page ===== -->
+    <div id="profilePage" class="page px-4 py-4">
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
+        <div class="flex items-center space-x-4 mb-6">
+          <div class="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold">
+            K
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-gray-800">โรงเรียนบ้านวังด้ง</h2>
+            <p class="text-sm text-gray-600">ระบบจัดการงานครู</p>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">settings</span>
+              <span class="text-gray-800">ตั้งค่า</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">help</span>
+              <span class="text-gray-800">ช่วยเหลือ</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">info</span>
+              <span class="text-gray-800">เกี่ยวกับ</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+        </div>
+      </div>
+
+      <button id="logoutBtnBottom" class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-medium hover:bg-red-100 transition flex items-center justify-center space-x-2 hidden">
+        <span class="material-icons">logout</span>
+        <span>ออกจากระบบ</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- Floating Action Button -->
+  <button id="fabBtn" class="fab bg-blue-600 text-white p-4 rounded-full hidden">
+    <span class="material-icons">keyboard_arrow_up</span>
+  </button>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <div class="max-w-7xl mx-auto flex justify-around items-center py-2">
+      <a href="#home" class="nav-item active" data-page="homePage">
+        <span class="material-icons">home</span>
+        <span>หน้าหลัก</span>
+      </a>
+      <a href="#tasks" class="nav-item" data-page="tasksPage">
+        <span class="material-icons">assignment</span>
+        <span>งานทั้งหมด</span>
+      </a>
+      <a href="#teachers" class="nav-item" data-page="teachersPage">
+        <span class="material-icons">people</span>
+        <span>ครู</span>
+      </a>
+      <a href="#profile" class="nav-item" data-page="profilePage">
+        <span class="material-icons">account_circle</span>
+        <span>โปรไฟล์</span>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Loading Toast -->
+  <div id="loadingToast" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-white shadow-lg rounded-full px-6 py-3 hidden z-50 flex items-center space-x-3">
+    <div class="loading"></div>
+    <span class="text-sm font-medium text-gray-700">กำลังโหลดข้อมูล...</span>
+  </div>
+
+  <!-- Task Modal (ยังไม่ใช้เพราะไม่มี endpoint สร้างงาน) -->
+  <div id="taskModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-800">เพิ่มงานใหม่</h3>
+            <button id="closeModalBtn" class="p-2 hover:bg-gray-100 rounded-lg transition">
+              <span class="material-icons text-gray-500">close</span>
+            </button>
+          </div>
+        </div>
+
+        <form id="taskForm" class="p-6 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">ชื่องาน <span class="text-red-500">*</span></label>
+            <input type="text" id="taskName" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="เช่น จัดทำรายงานประจำเดือน" />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">อีเมลผู้รับผิดชอบ</label>
+            <input type="email" id="taskAssignee" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="example@school.ac.th" />
+            <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากยังไม่กำหนดผู้รับผิดชอบ</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">วันที่ครบกำหนด</label>
+            <input type="date" id="taskDueDate" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากไม่มีกำหนดส่ง</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">รายละเอียดงาน</label>
+            <textarea id="taskNotes" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="อธิบายรายละเอียดเพิ่มเติม..."></textarea>
+          </div>
+
+          <div class="flex space-x-3 pt-4">
+            <button type="submit" id="submitTaskBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition flex items-center justify-center space-x-2">
+              <span class="material-icons text-base">add_task</span>
+              <span>เพิ่มงาน</span>
+            </button>
+            <button type="button" id="cancelModalBtn" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-medium transition">
+              ยกเลิก
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay for Modal -->
+  <div id="modalLoading" class="fixed inset-0 bg-black bg-opacity-50 z-60 hidden">
+    <div class="flex items-center justify-center min-h-screen">
+      <div class="bg-white rounded-xl px-8 py-6 shadow-xl flex items-center space-x-4">
+        <div class="loading"></div>
+        <span class="text-gray-700 font-medium">กำลังเพิ่มงาน...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Script (คุณจะส่งมา) -->
+  <script src="app.js"></script>
+
+  <!-- NoScript -->
+  <noscript>
+    <div class="max-w-2xl mx-auto p-4 mt-6 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-800">
+      โปรดเปิดใช้งาน JavaScript เพื่อใช้งาน KruBoard
+    </div>
+  </noscript>
+</body>
+</html>
