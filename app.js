@@ -350,10 +350,10 @@ function renderDashboard(data){
   }
 }
 
-function renderUpcomingTasks(list) {
+function renderUpcomingTasks(list){
   if (!els.taskCardsContainer) return;
-
-  if (!state.isLoggedIn) {
+  
+  if (!state.isLoggedIn){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
         เข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียดงานที่กำลังจะถึง
@@ -362,7 +362,7 @@ function renderUpcomingTasks(list) {
     return;
   }
 
-  if (!list.length) {
+  if (!list.length){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
         ไม่พบงานที่กำลังจะถึงในช่วง ${state.upcomingDays} วัน
@@ -371,62 +371,32 @@ function renderUpcomingTasks(list) {
     return;
   }
 
-  // ✓ Limit 7 items แรก
-  const DISPLAY_LIMIT = 7;
-  const displayList = list.slice(0, DISPLAY_LIMIT);
-  const remaining = list.length - displayList.length;
-
-  const html = displayList.map((task) => {
+  const html = list.map(task=>{
     const thaiDate = formatThaiDate(task.dueDate);
-    const isUrgent = task.daysUntilDue === '0';
-    const badgeClass = isUrgent
-      ? 'bg-red-100 text-red-600'
-      : 'bg-blue-100 text-blue-600';
-    const badgeLabel = isUrgent ? 'วันนี้' : `อีก ${task.daysUntilDue} วัน`;
-
     return `
-      <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100 transition-all hover:shadow-md hover:border-blue-200 cursor-pointer" data-task-id="${escapeAttr(task.id)}">
-        <div class="flex justify-between items-start gap-3">
-          <h3 class="text-base font-semibold text-gray-800 flex-1 line-clamp-2">${escapeHtml(task.name)}</h3>
-          <span class="text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${badgeClass}">
-            ${badgeLabel}
+      <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <div class="flex justify-between items-start">
+          <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
+          <span class="text-xs font-medium px-2 py-1 rounded-full ${task.daysUntilDue==='0' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">
+            ${task.daysUntilDue==='0' ? 'วันนี้' : `อีก ${task.daysUntilDue} วัน`}
           </span>
         </div>
         <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee)}</p>
-        <div class="flex items-center justify-between mt-3 text-sm text-gray-600 gap-2">
-          <span class="flex items-center space-x-1 min-w-0">
-            <span class="material-icons text-base text-blue-500 flex-shrink-0">event</span>
-            <span class="truncate">${escapeHtml(thaiDate)}</span>
+        <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
+          <span class="flex items-center space-x-1">
+            <span class="material-icons text-base text-blue-500">event</span>
+            <span>${escapeHtml(thaiDate)}</span>
           </span>
-          <span class="flex items-center space-x-1 flex-shrink-0">
+          <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-green-500">flag</span>
-            <span class="truncate">${escapeHtml(task.status || task.completed || '')}</span>
+            <span>${escapeHtml(task.status || task.completed || '')}</span>
           </span>
         </div>
       </div>
     `;
   }).join('');
-
-  // ✓ เพิ่มปุ่ม "ดูทั้งหมด" ถ้ามีเหลืออยู่
-  const moreSection = remaining > 0 ? `
-    <div class="text-center py-4">
-      <button id="btnViewAllUpcoming" class="inline-flex items-center justify-center space-x-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-lg transition font-medium">
-        <span class="material-icons text-base">expand_more</span>
-        <span>ดูงาน ${remaining} รายการ เพิ่มเติม</span>
-      </button>
-    </div>
-  ` : '';
-
-  els.taskCardsContainer.innerHTML = html + moreSection;
-
-  // ✓ Bind "View All" button
-  const btnViewAll = document.getElementById('btnViewAllUpcoming');
-  if (btnViewAll) {
-    btnViewAll.addEventListener('click', () => {
-      switchPage('tasksPage');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  }
+  
+  els.taskCardsContainer.innerHTML = html;
 }
 
 function renderTasks(tasks){
@@ -767,7 +737,7 @@ function bindUI(){
   }
 }
 
-function initModalElements() {
+function initModalElements(){
   els.taskModal = document.getElementById('taskModal');
   els.modalLoading = document.getElementById('modalLoading');
   els.taskForm = document.getElementById('taskForm');
@@ -778,105 +748,29 @@ function initModalElements() {
   els.taskAssigneeInput = document.getElementById('taskAssignee');
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
-
-  // ✓ Real-time validation on task name
-  if (els.taskNameInput) {
-    els.taskNameInput.addEventListener('input', validateTaskForm_);
-    els.taskNameInput.addEventListener('blur', function () {
-      this.classList.toggle('ring-2', !this.value.trim());
-      this.classList.toggle('ring-red-500', !this.value.trim());
-    });
-  }
-
-  // ✓ Email validation
-  if (els.taskAssigneeInput) {
-    els.taskAssigneeInput.addEventListener('blur', function () {
-      const email = this.value.trim();
-      if (email && !isValidEmail_(email)) {
-        this.classList.add('ring-2', 'ring-red-500', 'border-red-300');
-        this.nextElementSibling.textContent = '⚠️ รูปแบบอีเมลไม่ถูกต้อง';
-        this.nextElementSibling.style.color = '#ef4444';
-      } else {
-        this.classList.remove('ring-2', 'ring-red-500', 'border-red-300');
-        if (this.nextElementSibling) {
-          this.nextElementSibling.textContent = 'ปล่อยว่างได้หากยังไม่กำหนดผู้รับผิดชอบ';
-          this.nextElementSibling.style.color = '#6b7280';
-        }
-      }
-    });
-  }
-
-  if (els.closeModalBtn)
-    els.closeModalBtn.addEventListener('click', closeTaskModal);
-  if (els.cancelModalBtn)
-    els.cancelModalBtn.addEventListener('click', closeTaskModal);
-  if (els.taskForm)
-    els.taskForm.addEventListener('submit', handleTaskFormSubmit);
-
-  if (els.taskModal) {
-    els.taskModal.addEventListener('click', (evt) => {
+  
+  if (els.closeModalBtn) els.closeModalBtn.addEventListener('click', closeTaskModal);
+  if (els.cancelModalBtn) els.cancelModalBtn.addEventListener('click', closeTaskModal);
+  if (els.taskForm) els.taskForm.addEventListener('submit', handleTaskFormSubmit);
+  if (els.taskModal){
+    els.taskModal.addEventListener('click', (evt)=>{
       if (evt.target === els.taskModal) closeTaskModal();
     });
   }
 }
 
-function validateTaskForm_() {
-  if (!els.submitTaskBtn) return;
-
-  const name = (els.taskNameInput?.value || '').trim();
-  const isValid = name.length >= 3;
-
-  els.submitTaskBtn.disabled = !isValid;
-  els.submitTaskBtn.style.opacity = isValid ? '1' : '0.5';
-  els.submitTaskBtn.style.cursor = isValid ? 'pointer' : 'not-allowed';
-
-  // Update button color
-  if (isValid) {
-    els.submitTaskBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-    els.submitTaskBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
-  } else {
-    els.submitTaskBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    els.submitTaskBtn.classList.remove('hover:bg-blue-700');
-  }
-}
-
-function isValidEmail_(email) {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(email);
-}
-
-function openTaskModal() {
+function openTaskModal(){
   if (!els.taskModal) return;
   els.taskModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-
-  if (els.taskForm) {
-    els.taskForm.reset();
-  }
-
-  if (els.taskDueDateInput) {
+  if (els.taskForm) els.taskForm.reset();
+  if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
-
-    // ✓ Set default to tomorrow
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowYY = tomorrow.getFullYear();
-    const tomorrowMM = String(tomorrow.getMonth() + 1).padStart(2, '0');
-    const tomorrowDD = String(tomorrow.getDate()).padStart(2, '0');
-    els.taskDueDateInput.value = `${tomorrowYY}-${tomorrowMM}-${tomorrowDD}`;
   }
-
-  // ✓ Autofocus after modal rendered
-  setTimeout(() => {
-    if (els.taskNameInput) {
-      els.taskNameInput.focus();
-      els.taskNameInput.select();
-    }
-  }, 100);
 }
 
 function closeTaskModal(){
@@ -1227,7 +1121,6 @@ function renderProfilePage(){
     if (banner && banner.parentNode){
       banner.parentNode.removeChild(banner);
     }
-        updateNavProfileImage();
   }
   if (!els.profilePage) return;
   if (!state.isLoggedIn || !state.profile){
@@ -1342,38 +1235,6 @@ function renderProfilePage(){
   }
   updateAdminUI();
   addAdminOptions();
-}
-
-/**
- * ✓ NEW: แสดงรูป Profile แทน Icon ใน Bottom Nav
- */
-function updateNavProfileImage() {
-  if (!state.profile || !state.profile.pictureUrl) return;
-
-  const profileNav = document.querySelector('[data-page="profilePage"]');
-  if (!profileNav) return;
-
-  // ลบ icon เดิม
-  const oldIcon = profileNav.querySelector('.material-icons');
-  if (oldIcon) oldIcon.remove();
-
-  // ลบรูปเก่าถ้ามี
-  const oldImg = profileNav.querySelector('img');
-  if (oldImg) oldImg.remove();
-
-  // เพิ่มรูปใหม่
-  const img = document.createElement('img');
-  img.src = state.profile.pictureUrl;
-  img.alt = 'profile';
-  img.className = 'w-6 h-6 rounded-full object-cover border-2 border-blue-600';
-  img.style.cssText = 'margin-bottom: 4px; display: inline-block;';
-  img.loading = 'lazy';
-
-  // หา container flex
-  const flexContainer = profileNav.querySelector('[class*="flex"]');
-  if (flexContainer) {
-    flexContainer.insertBefore(img, flexContainer.firstChild);
-  }
 }
 
 function ensureLiffSdk(){
