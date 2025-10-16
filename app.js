@@ -141,28 +141,119 @@ function init(){
  * ======================================================= **/
 
 // Replace apiRequest Fetch implementation with JSONP
-async function apiRequest(action, params = {}, options = {}) {
-  const { timeout = APP_CONFIG.requestTimeout, retryCount = 0, maxRetries = APP_CONFIG.retryAttempts } = options;
+// async function apiRequest(action, params = {}, options = {}) {
+//   const { timeout = APP_CONFIG.requestTimeout, retryCount = 0, maxRetries = APP_CONFIG.retryAttempts } = options;
   
+//   const payload = { action, ...params };
+//   if (state.profile?.idToken) payload.idToken = state.profile.idToken;
+//   if (state.apiKey && (action.includes('sync') || action.includes('analyze'))) {
+//     payload.pass = state.apiKey;
+//   }
+
+//   return new Promise((resolve, reject) => {
+//     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+//     let script;
+
+//     const tidyUp = () => {
+//       if (script && script.parentNode){
+//         script.parentNode.removeChild(script);
+//       }
+//       script = null;
+//       delete window[callbackName];
+//     };
+    
+//     // Set timeout
+//     const timeoutId = setTimeout(() => {
+//       tidyUp();
+//       const err = new Error('Request timeout');
+//       err.name = 'AbortError';
+//       reject(err);
+//     }, timeout);
+
+//     // Global callback
+//     window[callbackName] = (data) => {
+//       clearTimeout(timeoutId);
+//       tidyUp();
+      
+//       if (!data.success && retryCount < maxRetries) {
+//         console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
+//         setTimeout(() => {
+//           apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
+//             .then(resolve)
+//             .catch(reject);
+//         }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
+//       } else {
+//         resolve(data);
+//       }
+//     };
+
+//     // Create script tag
+//     script = document.createElement('script');
+//     script.async = true;
+//     script.dataset.jsonp = callbackName;
+//     const queryParams = new URLSearchParams({ 
+//       ...payload, 
+//       callback: callbackName 
+//     });
+//     script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
+//     script.onerror = () => {
+//       clearTimeout(timeoutId);
+//       tidyUp();
+//       reject(new Error('Script loading failed'));
+//     };
+//     document.head.appendChild(script);
+//   });
+// }
+
+async function apiRequest(action, params = {}, options = {}) {
+  const {
+    timeout = APP_CONFIG.requestTimeout,
+    retryCount = 0,
+    maxRetries = APP_CONFIG.retryAttempts,
+  } = options;
+
   const payload = { action, ...params };
   if (state.profile?.idToken) payload.idToken = state.profile.idToken;
   if (state.apiKey && (action.includes('sync') || action.includes('analyze'))) {
     payload.pass = state.apiKey;
   }
 
+  // --- 1) ลอง Fetch ก่อน (ถ้า CORS เปิดจะสำเร็จ) ---
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(()=> controller.abort(new Error('Request timeout')), timeout);
+    const url = `${APP_CONFIG.scriptUrl}`;
+    const res = await fetch(url, {
+      method: 'POST', // แนะนำ POST สำหรับ Apps Script JSON
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      credentials: 'omit',
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data || typeof data !== 'object') throw new Error('Invalid JSON');
+    if (data.success === false && retryCount < maxRetries) {
+      await new Promise(r => setTimeout(r, APP_CONFIG.retryDelay * Math.pow(2, retryCount)));
+      return apiRequest(action, params, { ...options, retryCount: retryCount + 1 });
+    }
+    return data;
+  } catch (e) {
+    // ถ้าเป็น CORS/HTTP/timeout ค่อย fallback เป็น JSONP
+  }
+
+  // --- 2) Fallback: JSONP (เหมือนเดิม แต่เพิ่ม retry ตอน script.onerror) ---
   return new Promise((resolve, reject) => {
-    const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const callbackName = `callback_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     let script;
 
     const tidyUp = () => {
-      if (script && script.parentNode){
-        script.parentNode.removeChild(script);
-      }
+      if (script && script.parentNode) script.parentNode.removeChild(script);
       script = null;
-      delete window[callbackName];
+      try { delete window[callbackName]; } catch(_){}
     };
-    
-    // Set timeout
+
     const timeoutId = setTimeout(() => {
       tidyUp();
       const err = new Error('Request timeout');
@@ -170,40 +261,44 @@ async function apiRequest(action, params = {}, options = {}) {
       reject(err);
     }, timeout);
 
-    // Global callback
     window[callbackName] = (data) => {
       clearTimeout(timeoutId);
       tidyUp();
-      
-      if (!data.success && retryCount < maxRetries) {
-        console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
+      if (!data || typeof data !== 'object') {
+        reject(new Error('Invalid JSONP payload'));
+        return;
+      }
+      if (data.success === false && retryCount < maxRetries) {
         setTimeout(() => {
           apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
-            .then(resolve)
-            .catch(reject);
+            .then(resolve).catch(reject);
         }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
       } else {
         resolve(data);
       }
     };
 
-    // Create script tag
+    const queryParams = new URLSearchParams({ ...payload, callback: callbackName });
     script = document.createElement('script');
     script.async = true;
     script.dataset.jsonp = callbackName;
-    const queryParams = new URLSearchParams({ 
-      ...payload, 
-      callback: callbackName 
-    });
     script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
     script.onerror = () => {
       clearTimeout(timeoutId);
       tidyUp();
-      reject(new Error('Script loading failed'));
+      if (retryCount < maxRetries) {
+        setTimeout(() => {
+          apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
+            .then(resolve).catch(reject);
+        }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
+      } else {
+        reject(new Error('Script loading failed'));
+      }
     };
     document.head.appendChild(script);
   });
 }
+
 
 /** =========================================================
  * FAST CACHED ENDPOINTS
@@ -571,7 +666,7 @@ function applyTaskFilters(){
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
     if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
-    return db - da;
+    return da - db;
   });
 
   state.filteredTasks = filtered;
@@ -791,13 +886,19 @@ function bindUI(){
     });
   });
 
+  // if (els.fabBtn){
+  //   els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
+  //   window.addEventListener('scroll', ()=>{
+  //     const shouldShow = window.scrollY > 300;
+  //     els.fabBtn.classList.toggle('hidden', !shouldShow);
+  //   });
+  // }
+
   if (els.fabBtn){
     els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
-    window.addEventListener('scroll', ()=>{
-      const shouldShow = window.scrollY > 300;
-      els.fabBtn.classList.toggle('hidden', !shouldShow);
-    });
+    window.addEventListener('scroll', updateFabVisibility, { passive: true });
   }
+
 
   if (els.notificationBtn){
     els.notificationBtn.addEventListener('click', showNotifications);
