@@ -506,49 +506,111 @@ function handleDataError(err, fallbackMessage){
 }
 
 async function loadPublicData(){
-  const dashboardPromise = fetchDashboardStats();
-  const upcomingPromise = loadUpcomingTasks();
-  const dashboard = await dashboardPromise;
-  renderDashboard(dashboard);
-  await upcomingPromise;
+  // dashboard เป็น public endpoint
+  const dash = await fetchDashboardStats();
+  renderDashboard(dash);
+  // upcoming ถูก guard เมื่อ REQUIRE_LINE_LOGIN=true → โหลดเฉพาะตอนล็อกอิน
+  if (state.isLoggedIn){
+    await loadUpcomingTasks();
+  }else{
+    // เคลียร์การ์ดแจ้งเตือนสำหรับผู้ที่ยังไม่ล็อกอิน
+    setText(els.notificationCount, 0);
+    if (els.taskCardsContainer){
+      els.taskCardsContainer.innerHTML = `
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
+          เข้าสู่ระบบผ่าน LINE เพื่อดูงานที่กำลังจะถึง
+        </div>
+      `;
+    }
+  }
 }
+
 
 function fetchDashboardStats(){
   const payload = { action:'dashboard' };
   if (state.isLoggedIn && state.profile?.idToken){
     payload.idToken = state.profile.idToken;
   }
-  return jsonpRequest(payload)
-    .then(res=>{
-      if (!res || res.success === false){
-        throw new Error(res?.message || 'dashboard error');
-      }
-      return res.data || {};
-    });
+  return jsonpRequest(payload).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'dashboard error');
+    }
+    // รูปแบบที่ API ส่งกลับ: { summary, personalSummary, currentUser }
+    const rawSummary = res.summary || res.data?.summary || {};
+    const personal = res.personalSummary || res.data?.personalSummary || null;
+    const currentUser = res.currentUser || null;
+
+    // ทำให้เป็น normalized summary ที่หน้าบ้านใช้เหมือนเดิมได้
+    // รองรับทั้งแบบใหม่ (totals/alerts) และแบบเดิม (totalAll/completedAll/...)
+    let totalTasks=0, completedTasks=0, pendingTasks=0, completionRate=0, currentMonthTasks=0, upcomingTasks=0, uniqueAssignees=0;
+
+    if (rawSummary.totals){ // แบบใหม่จาก apiComputeSummaryFallback_
+      totalTasks    = Number(rawSummary.totals.all || 0);
+      completedTasks= Number(rawSummary.totals.done || 0);
+      pendingTasks  = Number(rawSummary.totals.pending || 0);
+      completionRate= totalTasks ? Math.round((completedTasks/totalTasks)*100) : 0;
+      upcomingTasks = Number((rawSummary.alerts && rawSummary.alerts.dueSoon7d) || 0);
+      // currentMonthTasks/uniqueAssignees ไม่มีใน fallback → ปล่อย 0
+    }else{
+      // เผื่อกรณี backend อาจใช้ dashboard_overview style
+      totalTasks    = Number(rawSummary.totalAll || rawSummary.totalTasks || 0);
+      completedTasks= Number(rawSummary.completedAll || rawSummary.completedTasks || 0);
+      pendingTasks  = Number(rawSummary.pendingAll || rawSummary.pendingTasks || 0);
+      completionRate= Number(rawSummary.rateOverall || rawSummary.completionRate || (totalTasks ? Math.round((completedTasks/totalTasks)*100) : 0));
+      const monthObj = rawSummary.month || {};
+      currentMonthTasks = Number(monthObj.total || rawSummary.currentMonthTasks || 0);
+      // upcomingTasks/uniqueAssignees ไม่ได้ให้ → ปล่อย 0
+    }
+
+    // personal summary normalize
+    let personalNorm = null;
+    if (personal){
+      personalNorm = {
+        totalTasks: Number(personal.total || personal.totalTasks || 0),
+        completedTasks: Number(personal.completed || personal.completedTasks || 0),
+        pendingTasks: Number(personal.pending || personal.pendingTasks || 0),
+        currentMonthTasks: Number(personal.dueThisMonth || personal.currentMonthTasks || 0),
+        upcomingTasks: Number(personal.dueSoon7d || personal.upcomingTasks || 0),
+        email: personal.email || ''
+      };
+    }
+
+    // อัปเดต state ผู้ใช้/สิทธิ์จาก dashboard
+    if (currentUser){
+      state.currentUser = currentUser;
+      state.isAdmin = String(currentUser.level || '').trim().toLowerCase() === 'admin';
+    }
+
+    return {
+      summary: { totalTasks, completedTasks, pendingTasks, completionRate, currentMonthTasks, upcomingTasks, uniqueAssignees },
+      personal: personalNorm,
+      currentUser: state.currentUser || null
+    };
+  });
 }
 
+
 function loadUpcomingTasks(){
+  // ถ้ายังไม่ล็อกอินและระบบบังคับ login, ข้าม (loadPublicData จัดให้แล้ว)
+  if (!state.isLoggedIn){
+    return Promise.resolve([]);
+  }
   const payload = {
     action:'upcoming',
-    days: state.upcomingDays
+    days: state.upcomingDays,
+    scope: 'mine',
+    idToken: state.profile?.idToken || ''
   };
-  if (state.isLoggedIn){
-    payload.scope = 'mine';
-    if (state.profile?.idToken){
-      payload.idToken = state.profile.idToken;
-    }
-  }
   return jsonpRequest(payload)
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'upcoming error');
       }
-      const data = Array.isArray(res.data) ? res.data : [];
-      const personal = state.isLoggedIn;
-      state.notifications = personal ? data : [];
-      setText(els.notificationCount, personal ? (data.length || 0) : 0);
-      renderUpcomingTasks(data);
-      return data;
+      const list = Array.isArray(res.tasks) ? res.tasks : (Array.isArray(res.data) ? res.data : []);
+      state.notifications = list;
+      setText(els.notificationCount, list.length || 0);
+      renderUpcomingTasks(list);
+      return list;
     })
     .catch(err=>{
       console.error('Upcoming error:', err);
@@ -557,12 +619,14 @@ function loadUpcomingTasks(){
     });
 }
 
+
 function loadSecureData(){
   return Promise.all([
     fetchAllTasks(),
     fetchUserStats()
   ]).then(([tasksResult, stats])=>{
     state.tasks = tasksResult.tasks || [];
+    // currentUser/สิทธิ์ set แล้วจาก dashboard; fallback เผื่อ API ใส่มาด้วย
     if (tasksResult.currentUser){
       state.currentUser = tasksResult.currentUser;
       state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
@@ -581,42 +645,54 @@ function fetchAllTasks(){
     action:'tasks',
     scope:'mine',
     idToken: state.profile?.idToken || ''
-  })
-    .then(res=>{
-      if (!res || res.success === false){
-        throw new Error(res?.message || 'tasks error');
-      }
-      return {
-        tasks: Array.isArray(res.data) ? res.data : [],
-        currentUser: res.currentUser || null
-      };
-    });
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'tasks error');
+    }
+    const tasks = Array.isArray(res.tasks) ? res.tasks : (Array.isArray(res.data) ? res.data : []);
+    return { tasks, currentUser: res.currentUser || null };
+  });
 }
 
 function fetchUserStats(){
   return jsonpRequest({
     action:'user_stats',
     idToken: state.profile?.idToken || ''
-  })
-    .then(res=>{
-      if (!res || res.success === false){
-        throw new Error(res?.message || 'user stats error');
-      }
-      return Array.isArray(res.data) ? res.data : [];
-    });
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'user stats error');
+    }
+    // my_stats ส่ง object เดี่ยว → แปลงเป็น array 1 รายการ ให้ UI เดิมใช้ได้
+    const d = res || {};
+    const row = (d.email || d.total || d.completed || d.pending || d.rate || d.dueThisMonth || d.dueSoon7d)
+      ? d
+      : (d.data || {});
+    const one = {
+      assignee: '', // ถ้าอยากโชว์ชื่อให้ backend เติมมาได้
+      email: row.email || (state.profile?.email || ''),
+      totalTasks: Number(row.total || row.totalTasks || 0),
+      completedTasks: Number(row.completed || row.completedTasks || 0),
+      pendingTasks: Number(row.pending || row.pendingTasks || 0),
+      completionRate: Number(row.rate || row.completionRate || 0),
+      currentMonthTasks: Number(row.dueThisMonth || row.currentMonthTasks || 0),
+      upcomingTasks: Number(row.dueSoon7d || row.upcomingTasks || 0)
+    };
+    return [one];
+  });
 }
+
 
 function renderDashboard(data){
   state.dashboard = data || null;
   const summary = data?.summary || {};
-  setText(els.headerTotals.totalTasks, summary.totalTasks || 0);
-  setText(els.headerTotals.upcomingTasks, summary.upcomingTasks || 0);
-  setText(els.headerTotals.totalUsers, summary.uniqueAssignees || 0);
-  const completion = summary.completionRate != null ? `${summary.completionRate}%` : '0%';
+  setText(els.headerTotals.totalTasks, summary.totalTasks ?? 0);
+  setText(els.headerTotals.upcomingTasks, summary.upcomingTasks ?? 0);
+  setText(els.headerTotals.totalUsers, summary.uniqueAssignees ?? 0);
+  const completion = (summary.completionRate != null) ? `${summary.completionRate}%` : '0%';
   setText(els.headerTotals.completionRate, completion);
-  setText(els.stats.completed, summary.completedTasks || 0);
-  setText(els.stats.pending, summary.pendingTasks || 0);
-  setText(els.stats.month, summary.currentMonthTasks || 0);
+  setText(els.stats.completed, summary.completedTasks ?? 0);
+  setText(els.stats.pending, summary.pendingTasks ?? 0);
+  setText(els.stats.month, summary.currentMonthTasks ?? 0);
   setText(els.stats.completionRate, completion);
 
   state.personalStats = data?.personal || null;
@@ -637,16 +713,12 @@ function renderDashboard(data){
       setText(els.statsPersonal.upcoming, state.personalStats.upcomingTasks || 0);
     } else {
       els.statsPersonal.container.classList.add('hidden');
-      setText(els.headerTotals.myTasks, '-');
-      setText(els.headerTotals.myUpcoming, '-');
+      setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
+      setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
     }
   }
-
-  if (!state.personalStats){
-    setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
-    setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
-  }
 }
+
 
 function renderUpcomingTasks(list){
   if (!els.taskCardsContainer) return;
@@ -897,44 +969,42 @@ function renderUserStats(stats){
     `;
     return;
   }
-  // Filter only Active users if available
-  const activeStats = stats.filter(row => {
-    // Check if user has tasks (active users will have tasks)
-    return row.totalTasks > 0;
-  });
-  
-  if (!activeStats.length){
+  const list = Array.isArray(stats) ? stats : [];
+  if (!list.length){
     els.userStatsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่มีสถิติผู้ใช้ที่ Active
+        ไม่มีสถิติผู้ใช้
       </div>
     `;
     return;
   }
-  const html = activeStats.map((row, index)=>{
-    const completionClass = row.completionRate >= 80 ? 'text-green-600' : 
-                           row.completionRate >= 50 ? 'text-yellow-600' : 'text-red-600';
+  const html = list.map((row, i)=>{
+    const completionClass = row.completionRate >= 80 ? 'text-green-600'
+                         : row.completionRate >= 50 ? 'text-yellow-600'
+                         : 'text-red-600';
     return `
-    <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
-          ${index+1}
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
+            ${i+1}
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-gray-800">${escapeHtml(row.assignee || state.profile?.name || 'ฉัน')}</p>
+            <p class="text-xs text-gray-500">${escapeHtml(row.email || state.profile?.email || '')}</p>
+          </div>
         </div>
-        <div>
-          <p class="text-sm font-semibold text-gray-800">${escapeHtml(row.assignee || 'ไม่ทราบชื่อ')}</p>
-          <p class="text-xs text-gray-500">${escapeHtml(row.email || 'ไม่มีอีเมล')}</p>
+        <div class="flex flex-col sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
+          <span>งานทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
+          <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
+          <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
+          <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
         </div>
       </div>
-      <div class="flex flex-col sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
-        <span>งานทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
-        <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
-        <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
-        <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
-      </div>
-    </div>
-  `}).join('');
+    `;
+  }).join('');
   els.userStatsContainer.innerHTML = html;
 }
+
 
 function renderProfilePage(){
   if (state.isLoggedIn){
