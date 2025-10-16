@@ -52,6 +52,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       padding: 10px;
       cursor: pointer;
       transition: all 0.3s ease;
@@ -69,9 +70,108 @@
     
     .nav-item .material-icons {
       font-size: 24px;
-      margin-bottom: 4px;
+      margin-bottom: 0;
     }
-    
+
+    .nav-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 9999px;
+      background: #f3f4f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border: 2px solid transparent;
+      transition: transform 0.3s ease, border-color 0.3s ease, background 0.3s ease;
+    }
+
+    .nav-item.active .nav-avatar {
+      border-color: #2563eb;
+      background: rgba(37,99,235,0.12);
+      transform: translateY(-2px);
+    }
+
+    .nav-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .nav-avatar .material-icons {
+      margin-bottom: 0;
+    }
+
+    .input-with-icon {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 10px 14px;
+      background: #ffffff;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .input-with-icon:focus-within {
+      border-color: #2563eb;
+      box-shadow: 0 6px 18px rgba(37,99,235,0.18);
+      transform: translateY(-1px);
+    }
+
+    .input-with-icon .material-icons {
+      font-size: 20px;
+      color: #2563eb;
+      margin-bottom: 0;
+    }
+
+    .input-with-icon input,
+    .input-with-icon textarea {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 14px;
+      color: #1f2937;
+    }
+
+    .input-with-icon textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    .quick-due-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4b5563;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05);
+    }
+
+    .quick-due-btn:hover {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(37,99,235,0.25);
+      transform: translateY(-1px);
+    }
+
+    .quick-due-btn.active {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #ffffff;
+      box-shadow: 0 10px 20px rgba(37,99,235,0.35);
+    }
+
     .nav-item span {
       font-size: 11px;
       font-weight: 500;
@@ -456,8 +556,11 @@
         <span class="material-icons">people</span>
         <span>ครู</span>
       </a>
-      <a href="#profile" class="nav-item" data-page="profilePage">
-        <span class="material-icons">account_circle</span>
+            <a href="#profile" class="nav-item nav-item-profile" data-page="profilePage">
+        <span class="nav-avatar">
+          <img id="navProfileAvatar" src="" alt="Profile" class="hidden" />
+          <span class="material-icons nav-avatar-icon" id="navProfileIcon">account_circle</span>
+        </span>
         <span>โปรไฟล์</span>
       </a>
     </div>
@@ -468,74 +571,83 @@
     <div class="loading"></div>
     <span class="text-sm font-medium text-gray-700">กำลังโหลดข้อมูล...</span>
   </div>
-<!-- Task Modal -->
-<div id="taskModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
-  <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-      <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-bold text-gray-800">เพิ่มงานใหม่</h3>
-          <button id="closeModalBtn" class="p-2 hover:bg-gray-100 rounded-lg transition">
-            <span class="material-icons text-gray-500">close</span>
-          </button>
+  <!-- Task Modal -->
+  <div id="taskModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-hidden">
+        <div class="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 px-6 py-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wide text-white/80">สร้างภารกิจใหม่</p>
+              <h3 class="text-xl font-bold text-white mt-1">เพิ่มงานใหม่</h3>
+              <p class="text-sm text-white/80 mt-1">กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว</p>
+            </div>
+            <button id="closeModalBtn" class="p-2 rounded-full bg-white/15 hover:bg-white/25 transition">
+              <span class="material-icons text-white">close</span>
+            </button>
+          </div>
         </div>
+        <form id="taskForm" class="bg-white px-6 py-6 space-y-6">
+          <div class="grid gap-5">
+            <div class="space-y-2">
+              <label class="block text-sm font-medium text-gray-700">หัวข้องาน <span class="text-red-500">*</span></label>
+              <div class="input-with-icon">
+                <span class="material-icons">task_alt</span>
+                <input type="text" id="taskName" required class="w-full" placeholder="เช่น อัปเดตเอกสารประกอบการสอน">
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <label class="block text-sm font-medium text-gray-700">ผู้รับผิดชอบ (อีเมล)</label>
+              <div class="input-with-icon">
+                <span class="material-icons">alternate_email</span>
+                <input type="email" id="taskAssignee" class="w-full" placeholder="example@school.ac.th">
+              </div>
+              <p class="text-xs text-gray-500">ระบบจะจับคู่กับผู้ใช้ที่มีอีเมลเหมือนกันเพื่อคำนวณสถิติรายบุคคล</p>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-700">กำหนดเสร็จภายใน</label>
+                <span class="text-xs text-gray-500">เลือกวันที่หรือกดปุ่มด่วน</span>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="input-with-icon">
+                  <span class="material-icons">event</span>
+                  <input type="date" id="taskDueDate" class="w-full">
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="quick-due-btn" data-quick-due="0">วันนี้</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="1">พรุ่งนี้</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="3">อีก 3 วัน</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="7">ใน 7 วัน</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <label class="block text-sm font-medium text-gray-700">รายละเอียดเพิ่มเติม</label>
+              <div class="input-with-icon">
+                <span class="material-icons">notes</span>
+                <textarea id="taskNotes" rows="4" class="w-full" placeholder="บันทึกรายละเอียดหรือแนบลิงก์สำคัญ..."></textarea>
+              </div>
+              <p class="text-xs text-gray-500">เพิ่มข้อมูลประกอบเพื่อให้ผู้เกี่ยวข้องทำงานต่อได้ง่ายขึ้น</p>
+            </div>
+          </div>
+
+          <div class="flex flex-col-reverse sm:flex-row sm:space-x-3 sm:space-y-0 space-y-3 pt-2">
+            <button type="button" id="cancelModalBtn" class="sm:flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-lg font-medium transition">ยกเลิก</button>
+            <button type="submit" id="submitTaskBtn" class="sm:flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition flex items-center justify-center space-x-2 shadow-lg shadow-blue-200/50">
+              <span class="material-icons text-base">add_task</span>
+              <span>บันทึกงาน</span>
+            </button>
+          </div>
+        </form>
       </div>
-      
-      <form id="taskForm" class="p-6 space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
-            ชื่องาน <span class="text-red-500">*</span>
-          </label>
-          <input type="text" id="taskName" required
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="เช่น จัดทำรายงานประจำเดือน">
-        </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
-            อีเมลผู้รับผิดชอบ
-          </label>
-          <input type="email" id="taskAssignee"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="example@school.ac.th">
-          <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากยังไม่กำหนดผู้รับผิดชอบ</p>
-        </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
-            วันที่ครบกำหนด
-          </label>
-          <input type="date" id="taskDueDate"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-          <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากไม่มีกำหนดส่ง</p>
-        </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
-            รายละเอียดงาน
-          </label>
-          <textarea id="taskNotes" rows="4"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="อธิบายรายละเอียดเพิ่มเติม..."></textarea>
-        </div>
-        
-        <div class="flex space-x-3 pt-4">
-          <button type="submit" id="submitTaskBtn"
-            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition flex items-center justify-center space-x-2">
-            <span class="material-icons text-base">add_task</span>
-            <span>เพิ่มงาน</span>
-          </button>
-          <button type="button" id="cancelModalBtn"
-            class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-medium transition">
-            ยกเลิก
-          </button>
-        </div>
-      </form>
     </div>
   </div>
-</div>
 
-<!-- Loading Overlay for Modal -->
+  <!-- Loading Overlay for Modal -->
 <div id="modalLoading" class="fixed inset-0 bg-black bg-opacity-50 z-60 hidden">
   <div class="flex items-center justify-center min-h-screen">
     <div class="bg-white rounded-xl px-8 py-6 shadow-xl flex items-center space-x-4">
