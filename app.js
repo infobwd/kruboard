@@ -768,7 +768,7 @@ function renderUserStats(stats){
     return `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
         <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items<center justify-center text-white font-bold">
             ${index+1}
           </div>
           <div>
@@ -1331,8 +1331,11 @@ async function handleTaskFormSubmit(evt){
 
   const name = (els.taskNameInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
+  if (!validateDateFormat_(dueDate)){
+    toastError('รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)');
+    return;
+  }
 
-  // FIXED: remove stray \n tokens; use normal newlines
   let notes = (els.taskNotesInput?.value || '').trim();
   if (isEditing && !notes && editingTask && editingTask.notes){
     notes = String(editingTask.notes);
@@ -1505,7 +1508,7 @@ function addAdminOptions(){
     if (!adminSection){
       adminSection = document.createElement('div');
       adminSection.id = 'adminActionsSection';
-      adminSection.className = 'bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-300 rounded-2xl shadow-md p-6 mb-4';
+      adminSection.className = 'bg-gradient-to-r from.yellow-50 to-orange-50 border border-yellow-300 rounded-2xl shadow-md p-6 mb-4';
       adminSection.innerHTML = `
         <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
           <span class="material-icons text-orange-600 mr-2">admin_panel_settings</span>
@@ -1522,7 +1525,7 @@ function addAdminOptions(){
             </div>
             <span class="material-icons text-gray-400">chevron_right</span>
           </button>
-          <button class="w-full flex items<center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
+          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
             <div class="flex items-center space-x-3">
               <span class="material-icons text-purple-600">assessment</span>
               <div class="text-left">
@@ -1593,7 +1596,7 @@ function renderNotificationsPanel(){
           ${dueMarkup}
         </div>
         <div class="meta">
-          <span><span class="material-icons text-amber-500 text-sm align-middle">person</span>${escapeHtml(assignee)}</span>
+          <span><span class="material-icons text-amber-500 text-sm align.middle">person</span>${escapeHtml(assignee)}</span>
         </div>
       </div>
     `;
@@ -1740,7 +1743,7 @@ function renderLoginBanner(){
     <div class="flex items-center justify-between space-x-3">
       <div>
         <h2 class="text-base font-semibold text-gray-800">เข้าสู่ระบบผ่าน LINE</h2>
-        <p class="text-sm text-gray-500">ล็อกอินเพื่อดูรายละเอียดงานและอัปเดตสถานะ</p>
+        <p class="text.sm text-gray-500">ล็อกอินเพื่อดูรายละเอียดงานและอัปเดตสถานะ</p>
       </div>
       <button class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2" id="loginWithLineBtn">
         <span class="material-icons text-base">chat</span>
@@ -1773,7 +1776,7 @@ function renderProfilePage(){
     els.profilePage.innerHTML = `
       <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
         <div class="text-center">
-          <div class="w-24 h-24 mx-auto bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold">
+          <div class="w-24 h-24 mx-auto bg-gradient.to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold">
             KB
           </div>
           <h2 class="text-xl font-bold text-gray-800 mt-4">KruBoard</h2>
@@ -1804,7 +1807,7 @@ function renderProfilePage(){
   const avatarSrc = profile.pictureUrl || userRecord.linePictureUrl || userRecord.lineAvatarThumb || userRecord.picture || 'https://via.placeholder.com/100x100.png?text=LINE';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
-      <div class="flex items-center space-x-4 mb-6">
+      <div class="flex items.center space-x-4 mb-6">
         <img src="${escapeAttr(avatarSrc)}" alt="avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-100">
         <div>
           <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'ผู้ใช้งาน')}</h2>
@@ -1823,7 +1826,7 @@ function renderProfilePage(){
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnRefreshData">
-          <div class="flex items-center space-x-3">
+          <div class="flex items.center space-x-3">
             <span class="material-icons text-gray-600">sync</span>
             <span class="text-gray-800">รีเฟรชข้อมูล</span>
           </div>
@@ -2057,4 +2060,18 @@ function escapeHtml(value){
 function escapeAttr(value){
   if (value == null) return '';
   return String(value).replace(/"/g, '&quot;');
+}
+
+/**
+ * Validate a date string in YYYY-MM-DD format and ensure it is a real calendar date.
+ * Returns true if valid, false otherwise.
+ */
+function validateDateFormat_(value){
+  if (!value) return true; // allow empty -> "No Due Date"
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  if (!re.test(value)) return false;
+  const parts = value.split('-').map(n => parseInt(n, 10));
+  const y = parts[0], m = parts[1], d = parts[2];
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d;
 }
