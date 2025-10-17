@@ -176,18 +176,184 @@
       box-shadow: 0 10px 20px rgba(37,99,235,0.35);
     }
 
-    body.modal-open {
-      overflow: hidden;
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      overflow-y: auto;
+      z-index: 1250;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
     }
 
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - 32px);
+    }
+
+    .modal-container {
+      width: 100%;
+      max-width: 28rem;
+      background: #ffffff;
+      border-radius: 24px;
+      box-shadow: 0 28px 60px rgba(15, 23, 42, 0.32);
+      overflow: hidden;
+      transform: translateY(24px);
+      opacity: 0;
+      transition: transform 0.35s ease, opacity 0.35s ease;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 64px);
+    }
+
+    .modal-overlay.active .modal-container {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .modal-body {
+      overflow-y: auto;
+      padding: 24px;
+      background: linear-gradient(180deg, #f9fafb 0%, #ffffff 30%);
+    }
+
+    @media (max-width: 640px) {
+      .modal-wrapper {
+        align-items: flex-end;
+      }
+
+      .modal-container {
+        border-radius: 24px 24px 0 0;
+        max-height: calc(100vh - 32px);
+      }
+    }
+
+    .assignee-list {
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: #f8fafc;
+      padding: 12px;
+      max-height: 220px;
+      overflow-y: auto;
+      display: grid;
+      gap: 10px;
+    }
+
+    .assignee-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: #ffffff;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+    }
+
+    .assignee-option:hover {
+      border-color: rgba(37, 99, 235, 0.4);
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+    }
+
+    .assignee-option.active {
+      border-color: #2563eb;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(37, 99, 235, 0.02));
+    }
+
+    .assignee-option label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      cursor: pointer;
+    }
+
+    .assignee-option input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #2563eb;
+    }
+
+    .assignee-option .assignee-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .assignee-option .assignee-meta span:first-child {
+      font-weight: 600;
+      color: #1f2937;
+      font-size: 14px;
+    }
+
+    .assignee-option .assignee-meta span:last-child {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .assignee-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 500;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+    }
+
+    .assignee-chip button {
+      background: transparent;
+      border: none;
+      color: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .assignee-empty {
+      text-align: center;
+      font-size: 13px;
+      color: #6b7280;
+      padding: 16px 8px;
+    }
+
+    body.modal-open,
     body.notifications-open {
       overflow: hidden;
     }
 
-    body.notifications-open .bottom-nav,
-    body.modal-open .bottom-nav {
+    body.modal-open .bottom-nav,
+    body.notifications-open .bottom-nav {
       transform: translateY(110%);
       pointer-events: none;
+    }
+
+    body.modal-open .fab,
+    body.notifications-open .fab {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(24px);
     }
 
     .notifications-panel {
@@ -196,47 +362,111 @@
       display: flex;
       align-items: flex-end;
       justify-content: center;
-      background: rgba(15, 23, 42, 0.45);
-      z-index: 1200;
+      padding: 16px;
+      z-index: 1300;
+      opacity: 0;
+      pointer-events: none;
       transition: opacity 0.3s ease;
+    }
+
+    .notifications-panel.active {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .notifications-panel.hidden {
       display: none;
     }
 
+    .notifications-panel .panel-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .notifications-panel.active .panel-backdrop {
+      opacity: 1;
+    }
+
     .notifications-card {
+      position: relative;
       width: 100%;
       max-width: 420px;
-      background: #ffffff;
-      border-radius: 24px 24px 0 0;
-      padding: 20px 20px 24px;
-      box-shadow: 0 -12px 32px rgba(15,23,42,0.25);
-      animation: slideUp 0.3s ease;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-radius: 28px;
+      padding: 28px 24px;
+      box-shadow: 0 24px 50px rgba(15, 23, 42, 0.35);
+      transform: translateY(32px);
+      transition: transform 0.35s ease;
+      z-index: 1;
+    }
+
+    .notifications-panel.active .notifications-card {
+      transform: translateY(0);
     }
 
     .notifications-card header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
+      gap: 16px;
+    }
+
+    .notifications-card header h3 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .notifications-card header p {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-bottom: 4px;
     }
 
     .notifications-list {
       max-height: 320px;
       overflow-y: auto;
       display: grid;
-      gap: 12px;
-      padding-right: 4px;
+      gap: 14px;
+      padding-right: 6px;
+    }
+
+    .notifications-list::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .notifications-list::-webkit-scrollbar-thumb {
+      background: rgba(37, 99, 235, 0.4);
+      border-radius: 999px;
     }
 
     .notification-item {
-      border-radius: 16px;
-      padding: 14px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
+      position: relative;
+      border-radius: 18px;
+      padding: 16px 16px 16px 18px;
+      background: #ffffff;
+      border-left: 4px solid rgba(37, 99, 235, 0.6);
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
       display: grid;
-      gap: 4px;
+      gap: 6px;
+    }
+
+    .notification-item::before {
+      content: '';
+      position: absolute;
+      inset: 12px 16px auto auto;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #22c55e;
+      opacity: 0.8;
     }
 
     .notification-item .meta {
@@ -244,17 +474,49 @@
       color: #64748b;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
-    .notifications-panel .panel-backdrop {
-      position: absolute;
-      inset: 0;
+    .notification-item .meta span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .notification-item strong {
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .notification-due {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #2563eb;
+      font-weight: 600;
+    }
+
+    .notification-empty {
+      text-align: center;
+      font-size: 13px;
+      color: #64748b;
+      padding: 20px 12px;
+    }
+
+    .notifications-footer {
+      font-size: 12px;
+      color: #94a3b8;
+      text-align: center;
+      margin-top: 18px;
     }
 
     @keyframes slideUp {
       from { transform: translateY(40px); opacity: 0; }
       to { transform: translateY(0); opacity: 1; }
+    }
+to { transform: translateY(0); opacity: 1; }
     }
 
     .nav-item span {
@@ -300,15 +562,21 @@
     
     .fab {
       position: fixed;
-      bottom: 90px;
+      bottom: 120px;
       right: 20px;
-      z-index: 50;
+      z-index: 900;
       transition: all 0.3s ease;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+    }
+    
+    @media (min-width: 768px) {
+      .fab {
+        bottom: 70px;
+      }
     }
     
     .fab:hover {
-      transform: scale(1.1);
+      transform: scale(1.05);
     }
 
     /* Notification badge */
@@ -670,44 +938,53 @@
     <span class="text-sm font-medium text-gray-700">กำลังโหลดข้อมูล...</span>
   </div>
   <!-- Task Modal -->
-  <div id="taskModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
-    <div class="flex items-center justify-center min-h-screen p-4">
-      <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-hidden">
-        <div class="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 px-6 py-5">
+  <div id="taskModal" class="modal-overlay hidden">
+    <div class="modal-wrapper">
+      <div class="modal-container">
+        <div class="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 px-6 py-6">
           <div class="flex items-start justify-between">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-wide text-white/80">สร้างภารกิจใหม่</p>
+              <p class="text-xs font-semibold uppercase tracking-wide text-white/80">กำหนดรายละเอียดงาน</p>
               <h3 class="text-xl font-bold text-white mt-1" id="taskModalTitle">เพิ่มงานใหม่</h3>
-              <p class="text-sm text-white/80 mt-1" id="taskModalDescription">กรอกข้อมูลให้ครบเพื่อให้ทีมติดตามงานได้รวดเร็ว</p>
+              <p class="text-sm text-white/80 mt-1" id="taskModalDescription">กรอกข้อมูลให้ครบถ้วนเพื่อสร้างงานและแจ้งผู้รับผิดชอบ</p>
             </div>
-            <button id="closeModalBtn" class="p-2 rounded-full bg-white/15 hover:bg-white/25 transition">
+            <button id="closeModalBtn" class="p-2 rounded-full bg-white/20 hover:bg-white/30 transition">
               <span class="material-icons text-white">close</span>
             </button>
           </div>
         </div>
-        <form id="taskForm" class="bg-white px-6 py-6 space-y-6">
+        <form id="taskForm" class="modal-body space-y-6">
           <div class="grid gap-5">
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-gray-700">หัวข้องาน <span class="text-red-500">*</span></label>
+              <label class="block text-sm font-medium text-gray-700">ชื่องาน <span class="text-red-500">*</span></label>
               <div class="input-with-icon">
                 <span class="material-icons">task_alt</span>
-                <input type="text" id="taskName" required class="w-full" placeholder="เช่น อัปเดตเอกสารประกอบการสอน">
+                <input type="text" id="taskName" required class="w-full" placeholder="เช่น ติดตามเก็บคะแนนกลางภาค">
               </div>
             </div>
 
-            <div class="space-y-2">
-              <label class="block text-sm font-medium text-gray-700">ผู้รับผิดชอบ (อีเมล)</label>
-              <div class="input-with-icon">
-                <span class="material-icons">alternate_email</span>
-                <input type="email" id="taskAssignee" class="w-full" placeholder="example@school.ac.th">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="block text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
+                <span class="text-xs text-gray-500">เลือกได้หลายคน</span>
               </div>
-              <p class="text-xs text-gray-500">ระบบจะจับคู่กับผู้ใช้ที่มีอีเมลเหมือนกันเพื่อคำนวณสถิติรายบุคคล</p>
+              <div class="input-with-icon flex-col sm:flex-row sm:items-center sm:gap-4">
+                <div class="flex items-center gap-3 w-full">
+                  <span class="material-icons">groups</span>
+                  <input type="text" id="taskAssigneeSearch" class="w-full bg-transparent focus:outline-none" placeholder="ค้นหาชื่อหรืออีเมล" autocomplete="off">
+                </div>
+                <div id="taskAssigneeSelected" class="w-full flex flex-wrap gap-2 mt-3 sm:mt-0"></div>
+              </div>
+              <div id="taskAssigneeOptions" class="assignee-list">
+                <div class="assignee-empty">กำลังโหลดรายชื่อผู้รับผิดชอบ...</div>
+              </div>
+              <p class="text-xs text-gray-500">ระบบจะบันทึกแยก 1 แถวต่อ 1 ผู้รับผิดชอบในชีต AsanaToSheet</p>
             </div>
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-medium text-gray-700">กำหนดเสร็จภายใน</label>
-                <span class="text-xs text-gray-500">เลือกวันที่หรือกดปุ่มด่วน</span>
+                <label class="text-sm font-medium text-gray-700">วันครบกำหนด</label>
+                <span class="text-xs text-gray-500">ตั้งค่าคร่าวๆ ได้และแก้ไขได้ภายหลัง</span>
               </div>
               <div class="grid gap-3 md:grid-cols-2">
                 <div class="input-with-icon">
@@ -718,18 +995,18 @@
                   <button type="button" class="quick-due-btn" data-quick-due="0" aria-pressed="false">วันนี้</button>
                   <button type="button" class="quick-due-btn" data-quick-due="1" aria-pressed="false">พรุ่งนี้</button>
                   <button type="button" class="quick-due-btn" data-quick-due="3" aria-pressed="false">อีก 3 วัน</button>
-                  <button type="button" class="quick-due-btn" data-quick-due="7" aria-pressed="false">ใน 7 วัน</button>
+                  <button type="button" class="quick-due-btn" data-quick-due="7" aria-pressed="false">อีก 7 วัน</button>
                 </div>
               </div>
             </div>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-gray-700">รายละเอียดเพิ่มเติม</label>
+              <label class="block text-sm font-medium text-gray-700">บันทึกเพิ่มเติม</label>
               <div class="input-with-icon">
                 <span class="material-icons">notes</span>
-                <textarea id="taskNotes" rows="4" class="w-full" placeholder="บันทึกรายละเอียดหรือแนบลิงก์สำคัญ..."></textarea>
+                <textarea id="taskNotes" rows="4" class="w-full" placeholder="เพิ่มรายละเอียดสำคัญหรือแนบข้อมูลประกอบ..."></textarea>
               </div>
-              <p class="text-xs text-gray-500">เพิ่มข้อมูลประกอบเพื่อให้ผู้เกี่ยวข้องทำงานต่อได้ง่ายขึ้น</p>
+              <p class="text-xs text-gray-500">รายละเอียดจะถูกเก็บไว้ในคอลัมน์ Notes เพื่อให้ทีมเห็นร่วมกัน</p>
             </div>
           </div>
 
@@ -750,15 +1027,15 @@
     <div class="notifications-card">
       <header>
         <div>
-          <p class="text-xs uppercase text-gray-400 font-semibold tracking-wide">การแจ้งเตือน</p>
-          <h3 class="text-lg font-bold text-gray-800 mt-0.5">งานที่ใกล้ถึงกำหนด</h3>
+          <p class="text-xs uppercase font-semibold tracking-wide text-slate-400">การแจ้งเตือน</p>
+          <h3 class="text-lg font-bold text-slate-900 mt-1">งานใกล้ครบกำหนด</h3>
         </div>
-        <button type="button" id="notificationsClose" class="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition">
-          <span class="material-icons text-gray-500">close</span>
+        <button type="button" id="notificationsClose" class="p-2 rounded-full bg-white/80 text-gray-500 hover:bg-white shadow transition">
+          <span class="material-icons">close</span>
         </button>
       </header>
       <div id="notificationsList" class="notifications-list"></div>
-      <p class="text-xs text-gray-400 mt-3" id="notificationsFooter">อัปเดตจากรายการงานของคุณ</p>
+      <p class="notifications-footer" id="notificationsFooter">เราจะแจ้งเตือนทันทีที่มีงานที่ใกล้ครบกำหนด</p>
     </div>
   </div>
 
