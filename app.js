@@ -151,72 +151,6 @@ function init(){
 /** =========================================================
  * MODERN FETCH API - Replaces JSONP
  * ======================================================= **/
-
-// Replace apiRequest Fetch implementation with JSONP
-// async function apiRequest(action, params = {}, options = {}) {
-//   const { timeout = APP_CONFIG.requestTimeout, retryCount = 0, maxRetries = APP_CONFIG.retryAttempts } = options;
-  
-//   const payload = { action, ...params };
-//   if (state.profile?.idToken) payload.idToken = state.profile.idToken;
-//   if (state.apiKey && (action.includes('sync') || action.includes('analyze'))) {
-//     payload.pass = state.apiKey;
-//   }
-
-//   return new Promise((resolve, reject) => {
-//     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-//     let script;
-
-//     const tidyUp = () => {
-//       if (script && script.parentNode){
-//         script.parentNode.removeChild(script);
-//       }
-//       script = null;
-//       delete window[callbackName];
-//     };
-    
-//     // Set timeout
-//     const timeoutId = setTimeout(() => {
-//       tidyUp();
-//       const err = new Error('Request timeout');
-//       err.name = 'AbortError';
-//       reject(err);
-//     }, timeout);
-
-//     // Global callback
-//     window[callbackName] = (data) => {
-//       clearTimeout(timeoutId);
-//       tidyUp();
-      
-//       if (!data.success && retryCount < maxRetries) {
-//         console.warn(`Request failed, retrying... (${retryCount + 1}/${maxRetries})`);
-//         setTimeout(() => {
-//           apiRequest(action, params, { ...options, retryCount: retryCount + 1 })
-//             .then(resolve)
-//             .catch(reject);
-//         }, APP_CONFIG.retryDelay * Math.pow(2, retryCount));
-//       } else {
-//         resolve(data);
-//       }
-//     };
-
-//     // Create script tag
-//     script = document.createElement('script');
-//     script.async = true;
-//     script.dataset.jsonp = callbackName;
-//     const queryParams = new URLSearchParams({ 
-//       ...payload, 
-//       callback: callbackName 
-//     });
-//     script.src = `${APP_CONFIG.scriptUrl}?${queryParams}`;
-//     script.onerror = () => {
-//       clearTimeout(timeoutId);
-//       tidyUp();
-//       reject(new Error('Script loading failed'));
-//     };
-//     document.head.appendChild(script);
-//   });
-// }
-
 async function apiRequest(action, params = {}, options = {}) {
   const {
     timeout = APP_CONFIG.requestTimeout,
@@ -230,13 +164,13 @@ async function apiRequest(action, params = {}, options = {}) {
     payload.pass = state.apiKey;
   }
 
-  // --- 1) ลอง Fetch ก่อน (ถ้า CORS เปิดจะสำเร็จ) ---
+  // --- 1) Try Fetch first (works if CORS enabled) ---
   try {
     const controller = new AbortController();
     const t = setTimeout(()=> controller.abort(new Error('Request timeout')), timeout);
     const url = `${APP_CONFIG.scriptUrl}`;
     const res = await fetch(url, {
-      method: 'POST', // แนะนำ POST สำหรับ Apps Script JSON
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -252,10 +186,10 @@ async function apiRequest(action, params = {}, options = {}) {
     }
     return data;
   } catch (e) {
-    // ถ้าเป็น CORS/HTTP/timeout ค่อย fallback เป็น JSONP
+    // On CORS/HTTP/timeout errors, fallback to JSONP
   }
 
-  // --- 2) Fallback: JSONP (เหมือนเดิม แต่เพิ่ม retry ตอน script.onerror) ---
+  // --- 2) Fallback: JSONP (with retry on script.onerror) ---
   return new Promise((resolve, reject) => {
     const callbackName = `callback_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     let script;
@@ -474,6 +408,7 @@ function writeClientCache(key, data){
     console.warn('Client cache write failed:', err);
   }
 }
+
 async function loadSecureData(){
   showLoading(true, 'โหลดข้อมูลของคุณ...');
 
@@ -490,12 +425,12 @@ async function loadSecureData(){
       throw new Error(tasksResult?.message || 'tasks error');
     }
 
-  state.tasks = tasksResult.data || [];
-  if (tasksResult.currentUser){
-    state.currentUser = tasksResult.currentUser;
-    state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
-  }
-  updateProfileNavAvatar();
+    state.tasks = tasksResult.data || [];
+    if (tasksResult.currentUser){
+      state.currentUser = tasksResult.currentUser;
+      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
+    }
+    updateProfileNavAvatar();
 
     const stats = statsPromise.data || [];
     state.userStats = Array.isArray(stats) ? stats : [];
@@ -1184,7 +1119,7 @@ function handleAssigneeSearchInput(){
 }
 
 function handleAssigneeOptionClick(evt){
-  const checkbox = evt.target.closest('input[type=\"checkbox\"]');
+  const checkbox = evt.target.closest('input[type="checkbox"]');
   if (checkbox){
     const email = String(checkbox.dataset.email || checkbox.value || '').trim().toLowerCase();
     toggleAssigneeSelection(email, checkbox.checked);
@@ -1192,7 +1127,7 @@ function handleAssigneeOptionClick(evt){
   }
   const option = evt.target.closest('.assignee-option');
   if (!option) return;
-  const input = option.querySelector('input[type=\"checkbox\"]');
+  const input = option.querySelector('input[type="checkbox"]');
   if (!input) return;
   const email = String(input.dataset.email || input.value || '').trim().toLowerCase();
   const nextState = !input.checked;
@@ -1237,7 +1172,7 @@ function updateAssigneeOptionsActive(){
     const email = String(node.dataset.email || '').toLowerCase();
     const isSelected = state.selectedAssignees.includes(email);
     node.classList.toggle('active', isSelected);
-    const checkbox = node.querySelector('input[type=\"checkbox\"]');
+    const checkbox = node.querySelector('input[type="checkbox"]');
     if (checkbox) checkbox.checked = isSelected;
   });
 }
@@ -1246,12 +1181,12 @@ function updateAssigneeChips(){
   if (!els.taskAssigneeSelected) return;
   const selected = state.selectedAssignees || [];
   if (!selected.length){
-    els.taskAssigneeSelected.innerHTML = '<span class=\"text-xs text-gray-400\">ยังไม่ได้เลือก</span>';
+    els.taskAssigneeSelected.innerHTML = '<span class="text-xs text-gray-400">ยังไม่ได้เลือก</span>';
     return;
   }
   const chips = selected.map(email=>{
     const label = escapeHtml(getAssigneeLabel(email));
-    return `<span class=\"assignee-chip\" data-chip-email=\"${escapeAttr(email)}\">${label}<button type=\"button\" aria-label=\"ลบ ${label}\" data-remove-email=\"${escapeAttr(email)}\"><span class=\"material-icons\" style=\"font-size:16px;\">close</span></button></span>`;
+    return `<span class="assignee-chip" data-chip-email="${escapeAttr(email)}">${label}<button type="button" aria-label="ลบ ${label}" data-remove-email="${escapeAttr(email)}"><span class="material-icons" style="font-size:16px;">close</span></button></span>`;
   }).join('');
   els.taskAssigneeSelected.innerHTML = chips;
 }
@@ -1271,12 +1206,12 @@ function renderAssigneeOptions(list){
     const email = user.email || '';
     const isSelected = state.selectedAssignees.includes(email);
     const detail = [user.role, user.department].filter(Boolean).join(' • ');
-    const meta = detail ? `<span class=\"text-xs text-gray-400\">${escapeHtml(detail)}</span>` : '';
+    const meta = detail ? `<span class="text-xs text-gray-400">${escapeHtml(detail)}</span>` : '';
     return `
-      <div class=\"assignee-option${isSelected ? ' active' : ''}\" data-email=\"${escapeAttr(email)}\">
+      <div class="assignee-option${isSelected ? ' active' : ''}" data-email="${escapeAttr(email)}">
         <label>
-          <input type=\"checkbox\" data-email=\"${escapeAttr(email)}\" ${isSelected ? 'checked' : ''}>
-          <div class=\"assignee-meta\">
+          <input type="checkbox" data-email="${escapeAttr(email)}" ${isSelected ? 'checked' : ''}>
+          <div class="assignee-meta">
             <span>${escapeHtml(user.name || email)}</span>
             <span>${escapeHtml(email)}</span>
           </div>
@@ -1291,7 +1226,7 @@ function renderAssigneeOptions(list){
 
 function setAssigneeStatus(message){
   if (!els.taskAssigneeOptions) return;
-  els.taskAssigneeOptions.innerHTML = `<div class=\"assignee-empty\">${escapeHtml(message || '')}</div>`;
+  els.taskAssigneeOptions.innerHTML = `<div class="assignee-empty">${escapeHtml(message || '')}</div>`;
 }
 
 let activeUsersPromise = null;
@@ -1396,7 +1331,13 @@ async function handleTaskFormSubmit(evt){
 
   const name = (els.taskNameInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
-  let notes = (els.taskNotesInput?.value || '').trim();\n  if (isEditing && !notes && editingTask && editingTask.notes){\n    notes = String(editingTask.notes);\n  }
+
+  // FIXED: remove stray \n tokens; use normal newlines
+  let notes = (els.taskNotesInput?.value || '').trim();
+  if (isEditing && !notes && editingTask && editingTask.notes){
+    notes = String(editingTask.notes);
+  }
+
   const selectedAssignees = Array.isArray(state.selectedAssignees)
     ? state.selectedAssignees.filter(Boolean)
     : [];
@@ -1581,7 +1522,7 @@ function addAdminOptions(){
             </div>
             <span class="material-icons text-gray-400">chevron_right</span>
           </button>
-          <button class="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
+          <button class="w-full flex items<center justify-between p-4 bg-white hover:bg-gray-50 rounded-lg transition border border-gray-200" id="btnAdminAnalyze2">
             <div class="flex items-center space-x-3">
               <span class="material-icons text-purple-600">assessment</span>
               <div class="text-left">
@@ -1631,7 +1572,7 @@ function renderNotificationsPanel(){
   if (!els.notificationsList) return;
   const notifications = Array.isArray(state.notifications) ? state.notifications : [];
   if (!notifications.length){
-    els.notificationsList.innerHTML = '<div class=\"notification-empty\">ยังไม่มีงานที่ใกล้ครบกำหนด</div>';
+    els.notificationsList.innerHTML = '<div class="notification-empty">ยังไม่มีงานที่ใกล้ครบกำหนด</div>';
     if (els.notificationsFooter){
       els.notificationsFooter.textContent = 'เราจะแจ้งเตือนทันทีที่มีงานที่ใกล้ครบกำหนด';
     }
@@ -1643,16 +1584,16 @@ function renderNotificationsPanel(){
     const dueMeta = formatDueMeta_(task.dueDate);
     const assignee = task.assignee || task.assigneeName || task.assigneeEmail || 'ไม่ระบุผู้รับผิดชอบ';
     const taskId = task.id || task.gid || '';
-    const dueMarkup = dueMeta ? `<span class=\"notification-due\"><span class=\"material-icons text-blue-500 text-sm align-middle\">schedule</span>${escapeHtml(dueMeta)}</span>` : '';
+    const dueMarkup = dueMeta ? `<span class="notification-due"><span class="material-icons text-blue-500 text-sm align-middle">schedule</span>${escapeHtml(dueMeta)}</span>` : '';
     return `
-      <div class=\"notification-item\" data-task-id=\"${escapeAttr(taskId)}\">
+      <div class="notification-item" data-task-id="${escapeAttr(taskId)}">
         <strong>${escapeHtml(task.name || 'งานไม่ระบุ')}</strong>
-        <div class=\"meta\">
-          <span><span class=\"material-icons text-blue-500 text-sm align-middle\">event</span>${escapeHtml(dueDateLabel)}</span>
+        <div class="meta">
+          <span><span class="material-icons text-blue-500 text-sm align-middle">event</span>${escapeHtml(dueDateLabel)}</span>
           ${dueMarkup}
         </div>
-        <div class=\"meta\">
-          <span><span class=\"material-icons text-amber-500 text-sm align-middle\">person</span>${escapeHtml(assignee)}</span>
+        <div class="meta">
+          <span><span class="material-icons text-amber-500 text-sm align-middle">person</span>${escapeHtml(assignee)}</span>
         </div>
       </div>
     `;
@@ -1753,6 +1694,7 @@ async function handleDeleteTask(taskId){
     showLoading(false);
   }
 }
+
 async function initializeLiff(){
   try{
     await ensureLiffSdk();
@@ -1967,6 +1909,7 @@ function updateProfileNavAvatar(){
     icon.classList.remove('hidden');
   }
 }
+
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
