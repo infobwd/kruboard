@@ -1242,7 +1242,7 @@ async function ensureActiveUsers(forceReload){
   }
   if (activeUsersPromise && !forceReload) return activeUsersPromise;
   setAssigneeStatus('กำลังโหลดรายชื่อผู้รับผิดชอบ...');
-  activeUsersPromise = apiRequest('active_users', {}, { maxRetries: 1 })
+  activeUsersPromise = apiRequest('users_active', {}, { maxRetries: 1 })
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'active users error');
@@ -2062,16 +2062,137 @@ function escapeAttr(value){
   return String(value).replace(/"/g, '&quot;');
 }
 
+// /**
+//  * Validate a date string in YYYY-MM-DD format and ensure it is a real calendar date.
+//  * Returns true if valid, false otherwise.
+//  */
+// function validateDateFormat_(value){
+//   if (!value) return true; // allow empty -> "No Due Date"
+//   const re = /^\d{4}-\d{2}-\d{2}$/;
+//   if (!re.test(value)) return false;
+//   const parts = value.split('-').map(n => parseInt(n, 10));
+//   const y = parts[0], m = parts[1], d = parts[2];
+//   const dt = new Date(Date.UTC(y, m - 1, d));
+//   return dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d;
+// }
+
 /**
- * Validate a date string in YYYY-MM-DD format and ensure it is a real calendar date.
- * Returns true if valid, false otherwise.
+ * เพิ่มฟังชั่นเหล่านี้ท้ายสุดของ app.js
+ * (ใกล้บรรทัดสุดท้ายของไฟล์)
+ */
+
+/**
+ * ตรวจสอบรูปแบบวันที่ (YYYY-MM-DD) และคืน ISO string หรือ null
  */
 function validateDateFormat_(value){
-  if (!value) return true; // allow empty -> "No Due Date"
+  if (!value) return null;
   const re = /^\d{4}-\d{2}-\d{2}$/;
-  if (!re.test(value)) return false;
+  if (!re.test(value)) return null;
   const parts = value.split('-').map(n => parseInt(n, 10));
   const y = parts[0], m = parts[1], d = parts[2];
   const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d;
+  const valid = dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d;
+  return valid ? value : null;
 }
+
+/**
+ * แปลงวันที่ YYYY-MM-DD เป็นรูปแบบไทย
+ */
+function convertDateToThai_(dateString){
+  if (!dateString || dateString === 'No Due Date') return 'No Due Date';
+  let date;
+  if (dateString instanceof Date){
+    date = dateString;
+  } else {
+    date = new Date(dateString + 'T00:00:00+07:00');
+  }
+  if (isNaN(date)) return dateString;
+  const day = date.getDate();
+  const month = THAI_MONTHS[date.getMonth()];
+  const year = date.getFullYear() + 543;
+  return `${day} ${month} ${year}`;
+}
+
+/**
+ * ปรับรหัสงานให้ uppercase
+ */
+function normalizeTaskId_(taskId){
+  return String(taskId || '').trim().toUpperCase();
+}
+
+/**
+ * Generate Web Task ID ที่ unique
+ */
+function generateWebTaskId_(){
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return 'WEB' + timestamp + random;
+}
+
+/**
+ * ล้างข้อความ status
+ */
+function sanitizeStatus_(status){
+  return String(status || '').trim();
+}
+
+/**
+ * อ่าน Lookup Users (email → user record)
+ * ต้องมี state.userStats หรือจากฟังชั่นอื่น
+ */
+function getUserLookup_(){
+  const lookup = {
+    recordByEmail: {},
+    recordByLine: {}
+  };
+  
+  if (Array.isArray(state.userStats)){
+    state.userStats.forEach(user => {
+      const email = String(user.email || user.Email || '').toLowerCase();
+      const line = String(user.lineUID || user['LINE UID'] || '');
+      if (email){
+        lookup.recordByEmail[email] = {
+          email,
+          name: user.name || user.Name || email,
+          level: user.level || user.Level || '',
+          lineUID: line
+        };
+      }
+      if (line){
+        lookup.recordByLine[line] = lookup.recordByEmail[email] || { email, name: user.name || email };
+      }
+    });
+  }
+  
+  return lookup;
+}
+
+/**
+ * Sanitize callback name (สำหรับ JSONP)
+ */
+function sanitizeCallback_(name){
+  const s = String(name || '').trim();
+  return s.replace(/[^\w.$]/g, '');
+}
+
+/**
+ * Escape HTML entities (ป้องกัน XSS)
+ */
+function escapeHtml(value){
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Escape HTML attributes
+ */
+function escapeAttr(value){
+  if (value == null) return '';
+  return String(value).replace(/"/g, '&quot;');
+}
+
