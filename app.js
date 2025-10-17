@@ -11,6 +11,7 @@ const APP_CONFIG = {
 const state = {
   isLoggedIn: false,
   profile: null,
+  activePage: 'homePage',
   upcomingDays: 7,
   tasks: [],
   userStats: [],
@@ -18,6 +19,10 @@ const state = {
   personalStats: null,
   currentUser: null,
   notifications: [],
+  activeUsers: [],
+  filteredActiveUsers: [],
+  selectedAssignees: [],
+  assigneeSearchTerm: '',
   filteredTasks: [],
   taskFilters: { status:'all', search:'' },
   taskPagination: { page:1, pageSize:10, totalPages:1 },
@@ -83,6 +88,11 @@ const els = {
   navProfileIcon: document.getElementById('navProfileIcon'),
   nav: Array.from(document.querySelectorAll('.nav-item')),
   notificationBtn: document.getElementById('notificationBtn'),
+  notificationsPanel: document.getElementById('notificationsPanel'),
+  notificationsBackdrop: document.getElementById('notificationsBackdrop'),
+  notificationsClose: document.getElementById('notificationsClose'),
+  notificationsList: document.getElementById('notificationsList'),
+  notificationsFooter: document.getElementById('notificationsFooter'),
   taskSearchInput: document.getElementById('taskSearchInput'),
   taskStatusFilter: document.getElementById('taskStatusFilter'),
   taskPaginationPrev: document.getElementById('taskPaginationPrev'),
@@ -97,7 +107,9 @@ const els = {
   cancelModalBtn: null,
   submitTaskBtn: null,
   taskNameInput: null,
-  taskAssigneeInput: null,
+  taskAssigneeSearch: null,
+  taskAssigneeOptions: null,
+  taskAssigneeSelected: null,
   taskDueDateInput: null,
   taskNotesInput: null,
   quickDueButtons: []
@@ -423,6 +435,7 @@ function applyUpcomingData(list, source){
   state.cacheStatus.upcoming = source || null;
   state.notifications = personal ? data : [];
   setText(els.notificationCount, personal ? (data.length || 0) : 0);
+  renderNotificationsPanel();
   renderUpcomingTasks(data);
 }
 
@@ -717,6 +730,8 @@ function renderTaskList(){
       : 'bg-blue-600 hover:bg-blue-700 text-white';
     const buttonLabel = isCompleted ? 'เสร็จสมบูรณ์แล้ว' : 'ทำเครื่องหมายว่าเสร็จ';
     const disabledAttr = isCompleted ? 'disabled' : '';
+    const canManage = canManageTask(task);
+    const showCrud = canManage && String(task.source || '').toUpperCase() === 'WEB';
 
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
@@ -743,6 +758,18 @@ function renderTaskList(){
             </div>
           ` : ''}
         </div>
+        ${showCrud ? `
+        <div class="mt-3 flex items-center gap-2 text-xs">
+          <button type="button" class="px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition flex items-center gap-1" data-action="edit-task" data-task-id="${escapeAttr(task.id)}">
+            <span class="material-icons text-sm">edit</span>
+            <span>แก้ไข</span>
+          </button>
+          <button type="button" class="px-3 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition flex items-center gap-1" data-action="delete-task" data-task-id="${escapeAttr(task.id)}">
+            <span class="material-icons text-sm">delete</span>
+            <span>ลบ</span>
+          </button>
+        </div>
+        ` : ''}
         <button class="mt-4 w-full ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(task.id)}" ${disabledAttr}>
           <span class="material-icons text-base">${isCompleted ? 'task_alt' : 'done'}</span>
           <span>${buttonLabel}</span>
@@ -835,6 +862,8 @@ function cachePages(){
   pages.forEach(page => {
     els.pages[page.id] = page;
   });
+  const active = pages.find(page => page.classList.contains('active'));
+  if (active) state.activePage = active.id;
   els.homePage = els.pages.homePage;
   els.tasksPage = els.pages.tasksPage;
   els.teachersPage = els.pages.teachersPage;
@@ -852,6 +881,7 @@ function bindUI(){
         return;
       }
       switchPage(pageId);
+      updateFabVisibility();
       
       if (pageId === 'tasksPage'){
         setTimeout(addSyncButton, 100);
@@ -888,22 +918,46 @@ function bindUI(){
 
   if (els.fabBtn){
     els.fabBtn.addEventListener('click', ()=> window.scrollTo({ top:0, behavior:'smooth' }));
-    window.addEventListener('scroll', ()=>{
-      const shouldShow = window.scrollY > 300;
-      els.fabBtn.classList.toggle('hidden', !shouldShow);
-    });
+    window.addEventListener('scroll', ()=> updateFabVisibility());
+    updateFabVisibility();
   }
 
   if (els.notificationBtn){
     els.notificationBtn.addEventListener('click', showNotifications);
   }
+  if (els.notificationsClose){
+    els.notificationsClose.addEventListener('click', closeNotificationsPanel);
+  }
+  if (els.notificationsBackdrop){
+    els.notificationsBackdrop.addEventListener('click', closeNotificationsPanel);
+  }
+
+  document.addEventListener('keydown', evt => {
+    if (evt.key === 'Escape'){
+      if (document.body.classList.contains('modal-open')){
+        closeTaskModal();
+        return;
+      }
+      if (document.body.classList.contains('notifications-open')){
+        closeNotificationsPanel();
+      }
+    }
+  });
 
   if (els.allTasksContainer){
     els.allTasksContainer.addEventListener('click', evt=>{
-      const button = evt.target.closest('[data-action="update-status"]');
+      const button = evt.target.closest('[data-action]');
       if (!button) return;
       const taskId = button.dataset.taskId;
-      handleUpdateStatus(taskId);
+      const action = button.dataset.action;
+      if (!taskId || !action) return;
+      if (action === 'update-status'){
+        handleUpdateStatus(taskId);
+      }else if (action === 'edit-task'){
+        handleEditTask(taskId);
+      }else if (action === 'delete-task'){
+        handleDeleteTask(taskId);
+      }
     });
   }
 
@@ -944,7 +998,7 @@ function bindUI(){
   }
 
   if (els.addTaskBtn){
-    els.addTaskBtn.addEventListener('click', openTaskModal);
+    els.addTaskBtn.addEventListener('click', ()=> openTaskModal());
   }
 }
 
@@ -956,14 +1010,16 @@ function initModalElements(){
   els.cancelModalBtn = document.getElementById('cancelModalBtn');
   els.submitTaskBtn = document.getElementById('submitTaskBtn');
   els.taskNameInput = document.getElementById('taskName');
-  els.taskAssigneeInput = document.getElementById('taskAssignee');
+  els.taskAssigneeSearch = document.getElementById('taskAssigneeSearch');
+  els.taskAssigneeOptions = document.getElementById('taskAssigneeOptions');
+  els.taskAssigneeSelected = document.getElementById('taskAssigneeSelected');
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
   els.quickDueButtons = Array.from(document.querySelectorAll('[data-quick-due]'));
   if (els.taskDueDateInput){
     els.taskDueDateInput.addEventListener('input', ()=> updateQuickDueActive(null));
   }
-  
+
   if (els.quickDueButtons.length){
     els.quickDueButtons.forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -972,24 +1028,79 @@ function initModalElements(){
       });
     });
   }
-  
+
+  if (els.taskAssigneeSearch){
+    els.taskAssigneeSearch.addEventListener('input', handleAssigneeSearchInput);
+  }
+  if (els.taskAssigneeOptions){
+    els.taskAssigneeOptions.addEventListener('click', handleAssigneeOptionClick);
+  }
+  if (els.taskAssigneeSelected){
+    els.taskAssigneeSelected.addEventListener('click', handleAssigneeChipClick);
+  }
+
   if (els.closeModalBtn) els.closeModalBtn.addEventListener('click', closeTaskModal);
   if (els.cancelModalBtn) els.cancelModalBtn.addEventListener('click', closeTaskModal);
   if (els.taskForm) els.taskForm.addEventListener('submit', handleTaskFormSubmit);
   if (els.taskModal){
-    els.taskModal.addEventListener('click', (evt)=>{
-      if (evt.target === els.taskModal) closeTaskModal();
+    els.taskModal.addEventListener('animationend', ()=> updateFabVisibility());
+    els.taskModal.addEventListener('click', evt=>{
+      if (evt.target === els.taskModal){
+        closeTaskModal();
+      }
     });
   }
   updateQuickDueActive(null);
+  updateAssigneeChips();
 }
 
-function openTaskModal(){
+function openTaskModal(task){
   if (!els.taskModal) return;
-  els.taskModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
+  const isEditing = !!task;
+  state.editingTask = task || null;
+
   if (els.taskForm) els.taskForm.reset();
   updateQuickDueActive(null);
+
+  const titleEl = els.taskModalTitle;
+  const descEl = els.taskModalDescription;
+  const submitLabel = els.submitTaskBtn?.querySelector('span:last-child');
+  if (titleEl) titleEl.textContent = isEditing ? 'แก้ไขงาน' : 'เพิ่มงานใหม่';
+  if (descEl) descEl.textContent = isEditing
+    ? 'ปรับปรุงรายละเอียดงานและบันทึกการแก้ไขของคุณ'
+    : 'กรอกข้อมูลให้ครบถ้วนเพื่อสร้างงานและแจ้งผู้รับผิดชอบ';
+  if (submitLabel) submitLabel.textContent = isEditing ? 'บันทึกการแก้ไข' : 'บันทึกงาน';
+
+  const applyEditSelection = () => {
+    const email = String(task?.assigneeEmail || '').trim().toLowerCase();
+    state.assigneeSearchTerm = '';
+    state.selectedAssignees = email ? [email] : [];
+    if (els.taskAssigneeSearch) els.taskAssigneeSearch.value = '';
+    if (state.activeUsers.length){
+      renderAssigneeOptions(state.activeUsers);
+    } else {
+      setAssigneeStatus(email ? 'กำลังโหลดรายชื่อผู้รับผิดชอบ...' : 'ยังไม่มีรายชื่อผู้รับผิดชอบ');
+    }
+    updateAssigneeChips();
+  };
+
+  if (isEditing){
+    if (els.taskNameInput) els.taskNameInput.value = task?.name || '';
+    if (els.taskDueDateInput){
+      const value = task?.dueDate && task.dueDate !== 'No Due Date' ? task.dueDate : '';
+      els.taskDueDateInput.value = value || '';
+    }
+    if (els.taskNotesInput) els.taskNotesInput.value = task?.notes || '';
+    state.assigneeSearchTerm = '';
+    state.selectedAssignees = [];
+    updateAssigneeChips();
+  } else {
+    resetAssigneeSelection();
+    if (els.taskNameInput) els.taskNameInput.value = '';
+    if (els.taskDueDateInput) els.taskDueDateInput.value = '';
+    if (els.taskNotesInput) els.taskNotesInput.value = '';
+  }
+
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -997,12 +1108,44 @@ function openTaskModal(){
     const dd = String(today.getDate()).padStart(2, '0');
     els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
   }
-  if (els.taskNameInput) els.taskNameInput.focus();
+  document.body.classList.add('modal-open');
+  els.taskModal.classList.remove('hidden');
+  requestAnimationFrame(()=>{
+    if (els.taskModal) els.taskModal.classList.add('active');
+  });
+  updateFabVisibility();
+  ensureActiveUsers().then(()=>{
+    if (isEditing){
+      applyEditSelection();
+    }else{
+      renderAssigneeOptions(state.activeUsers);
+    }
+  }).catch(()=>{});
+  if (isEditing){
+    applyEditSelection();
+  }
+  if (els.taskNameInput){
+    setTimeout(()=>{
+      try{
+        els.taskNameInput.focus({ preventScroll:true });
+      }catch(_){
+        els.taskNameInput.focus();
+      }
+    }, 120);
+  }
 }
 
 function closeTaskModal(){
-  if (els.taskModal) els.taskModal.classList.add('hidden');
-  document.body.style.overflow = '';
+  if (!els.taskModal) return;
+  els.taskModal.classList.remove('active');
+  document.body.classList.remove('modal-open');
+  state.editingTask = null;
+  updateFabVisibility();
+  setTimeout(()=>{
+    if (els.taskModal && !els.taskModal.classList.contains('active')){
+      els.taskModal.classList.add('hidden');
+    }
+  }, 220);
   updateQuickDueActive(null);
 }
 
@@ -1030,6 +1173,210 @@ function updateQuickDueActive(activeBtn){
   });
 }
 
+function handleAssigneeSearchInput(){
+  state.assigneeSearchTerm = (els.taskAssigneeSearch?.value || '').trim().toLowerCase();
+  if (!state.activeUsers.length){
+    renderAssigneeOptions([]);
+    return;
+  }
+  const filtered = filterActiveUsersByTerm_(state.activeUsers, state.assigneeSearchTerm);
+  renderAssigneeOptions(filtered);
+}
+
+function handleAssigneeOptionClick(evt){
+  const checkbox = evt.target.closest('input[type=\"checkbox\"]');
+  if (checkbox){
+    const email = String(checkbox.dataset.email || checkbox.value || '').trim().toLowerCase();
+    toggleAssigneeSelection(email, checkbox.checked);
+    return;
+  }
+  const option = evt.target.closest('.assignee-option');
+  if (!option) return;
+  const input = option.querySelector('input[type=\"checkbox\"]');
+  if (!input) return;
+  const email = String(input.dataset.email || input.value || '').trim().toLowerCase();
+  const nextState = !input.checked;
+  input.checked = nextState;
+  toggleAssigneeSelection(email, nextState);
+}
+
+function handleAssigneeChipClick(evt){
+  const button = evt.target.closest('[data-remove-email]');
+  if (!button) return;
+  const email = String(button.dataset.removeEmail || '').trim().toLowerCase();
+  toggleAssigneeSelection(email, false);
+}
+
+function toggleAssigneeSelection(email, forceValue){
+  if (!email) return;
+  const normalized = email.toLowerCase();
+  const selected = state.selectedAssignees || [];
+  const index = selected.indexOf(normalized);
+  const exists = index >= 0;
+  const shouldAdd = forceValue === true || (forceValue !== false && !exists);
+  if (state.editingTask){
+    state.selectedAssignees = shouldAdd ? [normalized] : [];
+    updateAssigneeOptionsActive();
+    updateAssigneeChips();
+    return;
+  }
+  if (shouldAdd && !exists){
+    selected.push(normalized);
+  }else if (!shouldAdd && exists){
+    selected.splice(index, 1);
+  }
+  state.selectedAssignees = selected;
+  updateAssigneeOptionsActive();
+  updateAssigneeChips();
+}
+
+function updateAssigneeOptionsActive(){
+  if (!els.taskAssigneeOptions) return;
+  const nodes = els.taskAssigneeOptions.querySelectorAll('.assignee-option');
+  nodes.forEach(node=>{
+    const email = String(node.dataset.email || '').toLowerCase();
+    const isSelected = state.selectedAssignees.includes(email);
+    node.classList.toggle('active', isSelected);
+    const checkbox = node.querySelector('input[type=\"checkbox\"]');
+    if (checkbox) checkbox.checked = isSelected;
+  });
+}
+
+function updateAssigneeChips(){
+  if (!els.taskAssigneeSelected) return;
+  const selected = state.selectedAssignees || [];
+  if (!selected.length){
+    els.taskAssigneeSelected.innerHTML = '<span class=\"text-xs text-gray-400\">ยังไม่ได้เลือก</span>';
+    return;
+  }
+  const chips = selected.map(email=>{
+    const label = escapeHtml(getAssigneeLabel(email));
+    return `<span class=\"assignee-chip\" data-chip-email=\"${escapeAttr(email)}\">${label}<button type=\"button\" aria-label=\"ลบ ${label}\" data-remove-email=\"${escapeAttr(email)}\"><span class=\"material-icons\" style=\"font-size:16px;\">close</span></button></span>`;
+  }).join('');
+  els.taskAssigneeSelected.innerHTML = chips;
+}
+
+function renderAssigneeOptions(list){
+  if (!els.taskAssigneeOptions) return;
+  const users = Array.isArray(list) ? list : [];
+  state.filteredActiveUsers = users;
+  if (!users.length){
+    const message = state.activeUsers.length
+      ? 'ไม่พบรายชื่อที่ตรงกับการค้นหา'
+      : 'ยังไม่มีรายชื่อผู้รับผิดชอบ';
+    setAssigneeStatus(message);
+    return;
+  }
+  const html = users.map(user=>{
+    const email = user.email || '';
+    const isSelected = state.selectedAssignees.includes(email);
+    const detail = [user.role, user.department].filter(Boolean).join(' • ');
+    const meta = detail ? `<span class=\"text-xs text-gray-400\">${escapeHtml(detail)}</span>` : '';
+    return `
+      <div class=\"assignee-option${isSelected ? ' active' : ''}\" data-email=\"${escapeAttr(email)}\">
+        <label>
+          <input type=\"checkbox\" data-email=\"${escapeAttr(email)}\" ${isSelected ? 'checked' : ''}>
+          <div class=\"assignee-meta\">
+            <span>${escapeHtml(user.name || email)}</span>
+            <span>${escapeHtml(email)}</span>
+          </div>
+        </label>
+        ${meta}
+      </div>
+    `;
+  }).join('');
+  els.taskAssigneeOptions.innerHTML = html;
+  updateAssigneeOptionsActive();
+}
+
+function setAssigneeStatus(message){
+  if (!els.taskAssigneeOptions) return;
+  els.taskAssigneeOptions.innerHTML = `<div class=\"assignee-empty\">${escapeHtml(message || '')}</div>`;
+}
+
+let activeUsersPromise = null;
+async function ensureActiveUsers(forceReload){
+  if (!state.isLoggedIn){
+    setAssigneeStatus('ต้องเข้าสู่ระบบเพื่อเลือกผู้รับผิดชอบ');
+    return [];
+  }
+  if (!forceReload && state.activeUsers.length){
+    const filtered = filterActiveUsersByTerm_(state.activeUsers, state.assigneeSearchTerm);
+    renderAssigneeOptions(filtered);
+    return state.activeUsers;
+  }
+  if (activeUsersPromise && !forceReload) return activeUsersPromise;
+  setAssigneeStatus('กำลังโหลดรายชื่อผู้รับผิดชอบ...');
+  activeUsersPromise = apiRequest('active_users', {}, { maxRetries: 1 })
+    .then(res=>{
+      if (!res || res.success === false){
+        throw new Error(res?.message || 'active users error');
+      }
+      const users = normalizeActiveUsers_(Array.isArray(res.data) ? res.data : []);
+      state.activeUsers = users;
+      const filtered = filterActiveUsersByTerm_(users, state.assigneeSearchTerm);
+      renderAssigneeOptions(filtered);
+      return users;
+    })
+    .catch(err=>{
+      console.error('Active users load failed', err);
+      setAssigneeStatus('ไม่สามารถโหลดรายชื่อผู้รับผิดชอบได้');
+      return [];
+    })
+    .finally(()=>{ activeUsersPromise = null; });
+  return activeUsersPromise;
+}
+
+function resetAssigneeSelection(){
+  state.assigneeSearchTerm = '';
+  const selected = [];
+  const currentEmail = String(state.currentUser?.email || '').trim().toLowerCase();
+  if (currentEmail) selected.push(currentEmail);
+  state.selectedAssignees = selected;
+  if (els.taskAssigneeSearch) els.taskAssigneeSearch.value = '';
+  if (state.activeUsers.length){
+    renderAssigneeOptions(state.activeUsers);
+  }else{
+    setAssigneeStatus('กำลังโหลดรายชื่อผู้รับผิดชอบ...');
+  }
+  updateAssigneeChips();
+}
+
+function getAssigneeLabel(email){
+  const normalized = String(email || '').toLowerCase();
+  const match = state.activeUsers.find(user => user.email === normalized);
+  return match?.name || normalized;
+}
+
+function normalizeActiveUsers_(list){
+  const seen = {};
+  return list.reduce((acc, raw)=>{
+    const email = String(raw.email || '').trim().toLowerCase();
+    if (!email || seen[email]) return acc;
+    seen[email] = true;
+    acc.push({
+      email,
+      name: raw.name || raw.displayName || raw.user || email,
+      role: raw.role || raw.level || raw.position || '',
+      department: raw.department || raw.group || ''
+    });
+    return acc;
+  }, []);
+}
+
+function filterActiveUsersByTerm_(users, term){
+  if (!Array.isArray(users)) return [];
+  const lower = String(term || '').toLowerCase();
+  if (!lower) return users.slice();
+  return users.filter(user=>{
+    const name = (user.name || '').toLowerCase();
+    const email = user.email || '';
+    const role = (user.role || '').toLowerCase();
+    const dept = (user.department || '').toLowerCase();
+    return name.includes(lower) || email.includes(lower) || role.includes(lower) || dept.includes(lower);
+  });
+}
+
 function showModalLoading(show){
   if (els.modalLoading) els.modalLoading.classList.toggle('hidden', !show);
 }
@@ -1042,13 +1389,25 @@ async function handleTaskFormSubmit(evt){
     return;
   }
   
+  const editingTask = state.editingTask ? { ...state.editingTask } : null;
+  const isEditing = !!editingTask;
+  const editingTaskId = editingTask ? (editingTask.id || editingTask.gid || editingTask.taskId || editingTask.TaskId || null) : null;
+  const originalAssignee = editingTask ? String(editingTask.assigneeEmail || '').trim().toLowerCase() : '';
+
   const name = (els.taskNameInput?.value || '').trim();
-  const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
-  const notes = (els.taskNotesInput?.value || '').trim();
+  let notes = (els.taskNotesInput?.value || '').trim();\n  if (isEditing && !notes && editingTask && editingTask.notes){\n    notes = String(editingTask.notes);\n  }
+  const selectedAssignees = Array.isArray(state.selectedAssignees)
+    ? state.selectedAssignees.filter(Boolean)
+    : [];
+  const primaryAssignee = selectedAssignees[0] || originalAssignee || '';
   
   if (!name){
     toastInfo('กรุณากรอกชื่องาน');
+    return;
+  }
+  if (isEditing && !editingTaskId){
+    toastError('ไม่พบข้อมูลงานสำหรับแก้ไข');
     return;
   }
   
@@ -1056,21 +1415,38 @@ async function handleTaskFormSubmit(evt){
   closeTaskModal();
   
   try{
-    const res = await apiRequest('web_create_task', {
-      name,
-      assigneeEmail,
-      dueDate,
-      notes
-    }, { maxRetries: 2 });
-    
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'create task error');
+    if (isEditing){
+      const updatePayload = {
+        taskId: editingTaskId,
+        name,
+        assigneeEmail: primaryAssignee,
+        dueDate,
+        notes
+      };
+      const res = await apiRequest('web_update_task', updatePayload, { maxRetries: 2 });
+      if (!res || res.success === false){
+        throw new Error(res?.message || 'update task error');
+      }
+      toastInfo('Task updated successfully');
+    }else{
+      const createPayload = {
+        name,
+        assigneeEmail: primaryAssignee,
+        dueDate,
+        notes
+      };
+      if (selectedAssignees.length){
+        createPayload.assignees = JSON.stringify(selectedAssignees);
+      }
+      const res = await apiRequest('web_create_task', createPayload, { maxRetries: 2 });
+      if (!res || res.success === false){
+        throw new Error(res?.message || 'create task error');
+      }
+      toastInfo('New task created');
     }
-    
-    toastInfo('✓ เพิ่มงานใหม่สำเร็จ');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
-    handleDataError(err, 'ไม่สามารถเพิ่มงานใหม่ได้');
+    handleDataError(err, isEditing ? 'ไม่สามารถอัปเดตงานได้' : 'ไม่สามารถเพิ่มงานใหม่ได้');
   }finally{
     showModalLoading(false);
   }
@@ -1247,61 +1623,136 @@ function showNotifications(){
     toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
     return;
   }
-  if (!state.notifications.length){
-    toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
-    return;
-  }
-  const lines = state.notifications.slice(0, 5).map(task=>{
-    const thaiDate = formatThaiDate(task.dueDate);
-    const meta = formatDueMeta_(task.dueDate);
-    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
-  });
-  const remaining = state.notifications.length - lines.length;
-  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
-  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
+  renderNotificationsPanel();
+  openNotificationsPanel();
 }
 
-async function handleUpdateStatus(taskId){
-  if (!state.isLoggedIn){
-    toastInfo('ต้องเข้าสู่ระบบก่อน');
-    return;
-  }
-  
-  const task = state.tasks.find(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
-  if (!task){
-    toastInfo('ไม่พบงานที่เลือก');
-    return;
-  }
-  if (task.completed === 'Yes'){
-    toastInfo('งานนี้ทำเสร็จแล้ว');
-    return;
-  }
-  
-  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
-  const confirmDone = confirm(`ยืนยันทำเครื่องหมายว่างาน "${task.name}" เสร็จสมบูรณ์หรือไม่?\nสถานะปัจจุบัน: ${currentStatus}`);
-  if (!confirmDone) return;
-  
-  showLoading(true, 'กำลังอัปเดต...');
-  
-  try{
-    const res = await apiRequest('web_update_status', {
-      taskId,
-      status: 'เสร็จสมบูรณ์'
-    }, { maxRetries: 2 });
-    
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'update failed');
+function renderNotificationsPanel(){
+  if (!els.notificationsList) return;
+  const notifications = Array.isArray(state.notifications) ? state.notifications : [];
+  if (!notifications.length){
+    els.notificationsList.innerHTML = '<div class=\"notification-empty\">ยังไม่มีงานที่ใกล้ครบกำหนด</div>';
+    if (els.notificationsFooter){
+      els.notificationsFooter.textContent = 'เราจะแจ้งเตือนทันทีที่มีงานที่ใกล้ครบกำหนด';
     }
-    
-    toastInfo('✓ อัปเดตสถานะเรียบร้อย');
+    return;
+  }
+  const limit = Math.min(7, notifications.length);
+  const items = notifications.slice(0, limit).map(task=>{
+    const dueDateLabel = formatThaiDate(task.dueDate);
+    const dueMeta = formatDueMeta_(task.dueDate);
+    const assignee = task.assignee || task.assigneeName || task.assigneeEmail || 'ไม่ระบุผู้รับผิดชอบ';
+    const taskId = task.id || task.gid || '';
+    const dueMarkup = dueMeta ? `<span class=\"notification-due\"><span class=\"material-icons text-blue-500 text-sm align-middle\">schedule</span>${escapeHtml(dueMeta)}</span>` : '';
+    return `
+      <div class=\"notification-item\" data-task-id=\"${escapeAttr(taskId)}\">
+        <strong>${escapeHtml(task.name || 'งานไม่ระบุ')}</strong>
+        <div class=\"meta\">
+          <span><span class=\"material-icons text-blue-500 text-sm align-middle\">event</span>${escapeHtml(dueDateLabel)}</span>
+          ${dueMarkup}
+        </div>
+        <div class=\"meta\">
+          <span><span class=\"material-icons text-amber-500 text-sm align-middle\">person</span>${escapeHtml(assignee)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+  els.notificationsList.innerHTML = items;
+  if (els.notificationsFooter){
+    if (notifications.length > limit){
+      els.notificationsFooter.textContent = `แสดง ${limit} จาก ${notifications.length} งานที่ใกล้ครบกำหนด`;
+    }else{
+      els.notificationsFooter.textContent = `รวมทั้งหมด ${notifications.length} งานที่ใกล้ครบกำหนด`;
+    }
+  }
+}
+
+function openNotificationsPanel(){
+  if (!els.notificationsPanel) return;
+  els.notificationsPanel.classList.remove('hidden');
+  requestAnimationFrame(()=>{
+    if (els.notificationsPanel) els.notificationsPanel.classList.add('active');
+  });
+  document.body.classList.add('notifications-open');
+  updateFabVisibility();
+}
+
+function closeNotificationsPanel(){
+  if (!els.notificationsPanel || els.notificationsPanel.classList.contains('hidden')) return;
+  els.notificationsPanel.classList.remove('active');
+  document.body.classList.remove('notifications-open');
+  updateFabVisibility();
+  setTimeout(()=>{
+    if (els.notificationsPanel && !els.notificationsPanel.classList.contains('active')){
+      els.notificationsPanel.classList.add('hidden');
+    }
+  }, 220);
+}
+
+function findTaskById(taskId){
+  return state.tasks.find(task => String(task.id).toUpperCase() === String(taskId).toUpperCase());
+}
+
+function canManageTask(task){
+  if (!task || !state.currentUser) return false;
+  if (state.isAdmin) return true;
+  const currentEmail = String(state.currentUser.email || '').trim().toLowerCase();
+  const taskEmail = String(task.assigneeEmail || '').trim().toLowerCase();
+  if (currentEmail && taskEmail && currentEmail === taskEmail) return true;
+  const createdBy = String(task.createdBy || '').trim();
+  const currentName = String(state.currentUser.name || '').trim();
+  if (createdBy && currentName && createdBy === currentName) return true;
+  return false;
+}
+
+function handleEditTask(taskId){
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    return;
+  }
+  const task = findTaskById(taskId);
+  if (!task){
+    toastInfo('ไม่พบบันทึกงานที่เลือก');
+    return;
+  }
+  if (!canManageTask(task)){
+    toastError('You do not have permission to edit this task');
+    return;
+  }
+  openTaskModal(task);
+}
+
+async function handleDeleteTask(taskId){
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    return;
+  }
+  const task = findTaskById(taskId);
+  if (!task){
+    toastInfo('ไม่พบบันทึกงานที่เลือก');
+    return;
+  }
+  if (!canManageTask(task)){
+    toastError('You do not have permission to delete this task');
+    return;
+  }
+  const confirmDelete = confirm('Delete task "' + task.name + '"?');
+  if (!confirmDelete) return;
+
+  showLoading(true, 'Deleting task...');
+  try{
+    const res = await apiRequest('web_delete_task', { taskId }, { maxRetries: 2 });
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'delete task error');
+    }
+    toastInfo('Task deleted successfully');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
-    handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
+    handleDataError(err, 'Unable to delete task');
   }finally{
     showLoading(false);
   }
 }
-
 async function initializeLiff(){
   try{
     await ensureLiffSdk();
@@ -1550,6 +2001,7 @@ function waitForLiffInstance(timeoutMs){
 }
 
 function switchPage(pageId){
+  state.activePage = pageId;
   Object.values(els.pages).forEach(page=>{
     page.classList.toggle('active', page.id === pageId);
   });
@@ -1557,6 +2009,22 @@ function switchPage(pageId){
     const match = item.getAttribute('data-page') === pageId;
     item.classList.toggle('active', match);
   });
+  updateFabVisibility();
+}
+
+function updateFabVisibility(){
+  if (!els.fabBtn) return;
+  const isTasksPage = state.activePage === 'tasksPage';
+  const modalOpen = document.body.classList.contains('modal-open');
+  const notificationsOpen = document.body.classList.contains('notifications-open');
+  let shouldShow = isTasksPage && !modalOpen && !notificationsOpen && window.scrollY > 200;
+  if (shouldShow && els.taskPaginationWrapper){
+    const rect = els.taskPaginationWrapper.getBoundingClientRect();
+    if (rect.top < window.innerHeight - 140){
+      shouldShow = false;
+    }
+  }
+  els.fabBtn.classList.toggle('hidden', !shouldShow);
 }
 
 function showLoading(show, text = 'กำลังโหลดข้อมูล...'){
